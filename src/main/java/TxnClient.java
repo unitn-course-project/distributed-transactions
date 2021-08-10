@@ -99,10 +99,21 @@ public class TxnClient extends AbstractActor {
     public static class ReadResultMsg implements Serializable {
         public final Integer key; // the key associated to the requested item
         public final Integer value; // the value found in the data store for that item
+        public String transactionId;
 
-        public ReadResultMsg(int key, int value) {
+        public ReadResultMsg(int key, int value, String transactionId) {
             this.key = key;
             this.value = value;
+            this.transactionId = transactionId;
+        }
+
+        @Override
+        public String toString() {
+            return "ReadResultMsg{" +
+                    "key=" + key +
+                    ", value=" + value +
+                    ", transactionId='" + transactionId + '\'' +
+                    '}';
         }
     }
 
@@ -195,7 +206,7 @@ public class TxnClient extends AbstractActor {
 
     private void onWelcomeMsg(WelcomeMsg msg) {
         this.coordinators = msg.coordinators;
-//    System.out.println(coordinators);
+//        System.out.println(coordinators);
         this.maxKey = msg.maxKey;
         beginTxn();
     }
