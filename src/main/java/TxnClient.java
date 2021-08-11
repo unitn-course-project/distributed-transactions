@@ -1,15 +1,18 @@
-import java.io.Serializable;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
-
-import akka.actor.*;
+import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
+import akka.actor.Cancellable;
+import akka.actor.Props;
 import scala.concurrent.duration.Duration;
+
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 public class TxnClient extends AbstractActor {
     private static final double COMMIT_PROBABILITY = 0.8;
     private static final double WRITE_PROBABILITY = 0.5;
-    private static final int MIN_TXN_LENGTH = 20;
-    private static final int MAX_TXN_LENGTH = 40;
+    private static final int MIN_TXN_LENGTH = 5;
+    private static final int MAX_TXN_LENGTH = 10;
     private static final int RAND_LENGTH_RANGE = MAX_TXN_LENGTH - MIN_TXN_LENGTH + 1;
 
     private final Integer clientId;
@@ -45,87 +48,6 @@ public class TxnClient extends AbstractActor {
         return Props.create(TxnClient.class, () -> new TxnClient(clientId));
     }
 
-    /*-- Message classes ------------------------------------------------------ */
-
-    // send this message to the client at startup to inform it about the coordinators and the keys
-    public static class WelcomeMsg implements Serializable {
-        public final Integer maxKey;
-        public final List<ActorRef> coordinators;
-
-        public WelcomeMsg(int maxKey, List<ActorRef> coordinators) {
-            this.maxKey = maxKey;
-            this.coordinators = Collections.unmodifiableList(new ArrayList<>(coordinators));
-        }
-    }
-
-    // stop the client
-    public static class StopMsg implements Serializable {
-    }
-
-    // reply from the coordinator receiving TxnBeginMsg
-    public static class TxnAcceptMsg implements Serializable {
-    }
-
-    // the client may timeout waiting for TXN begin confirmation (TxnAcceptMsg)
-    public static class TxnAcceptTimeoutMsg implements Serializable {
-    }
-
-    // message the client sends to a coordinator to end the TXN;
-    // it may ask for commit (with probability COMMIT_PROBABILITY), or abort
-    public static class TxnEndMsg implements Serializable {
-        public final Integer clientId;
-        public final Boolean commit; // if false, the transaction should abort
-
-        public TxnEndMsg(int clientId, boolean commit) {
-            this.clientId = clientId;
-            this.commit = commit;
-        }
-    }
-
-    // WRITE request from the client to the coordinator
-    public static class WriteMsg implements Serializable {
-        public final Integer clientId;
-        public final Integer key; // the key of the value to write
-        public final Integer value; // the new value to write
-
-        public WriteMsg(int clientId, int key, int value) {
-            this.clientId = clientId;
-            this.key = key;
-            this.value = value;
-        }
-    }
-
-    // reply from the coordinator when requested a READ on a given key
-    public static class ReadResultMsg implements Serializable {
-        public final Integer key; // the key associated to the requested item
-        public final Integer value; // the value found in the data store for that item
-        public String transactionId;
-
-        public ReadResultMsg(int key, int value, String transactionId) {
-            this.key = key;
-            this.value = value;
-            this.transactionId = transactionId;
-        }
-
-        @Override
-        public String toString() {
-            return "ReadResultMsg{" +
-                    "key=" + key +
-                    ", value=" + value +
-                    ", transactionId='" + transactionId + '\'' +
-                    '}';
-        }
-    }
-
-    // message from the coordinator to the client with the outcome of the TXN
-    public static class TxnResultMsg implements Serializable {
-        public final Boolean commit; // if false, the transaction was aborted
-
-        public TxnResultMsg(boolean commit) {
-            this.commit = commit;
-        }
-    }
-
     /*-- Actor methods -------------------------------------------------------- */
 
     // start a new TXN: choose a random coordinator, send TxnBeginMsg and set timeout
@@ -143,7 +65,7 @@ public class TxnClient extends AbstractActor {
 
         // contact a random coordinator and begin TXN
         currentCoordinator = coordinators.get(r.nextInt(coordinators.size()));
-        currentCoordinator.tell(new Coordinator.TxnBeginMsg(clientId), getSelf());
+        currentCoordinator.tell(new Message.TxnBeginMsg(clientId), getSelf());
 
         // how many operations (taking some amount and adding it somewhere else)?
         int numExtraOp = RAND_LENGTH_RANGE > 0 ? r.nextInt(RAND_LENGTH_RANGE) : 0;
@@ -154,7 +76,7 @@ public class TxnClient extends AbstractActor {
         acceptTimeout = getContext().system().scheduler().scheduleOnce(
                 Duration.create(500, TimeUnit.MILLISECONDS),
                 getSelf(),
-                new TxnAcceptTimeoutMsg(), // message sent to myself
+                new Message.TxnAcceptTimeoutMsg(), // message sent to myself
                 getContext().system().dispatcher(), getSelf()
         );
         System.out.println("CLIENT " + clientId + " BEGIN");
@@ -163,7 +85,7 @@ public class TxnClient extends AbstractActor {
     // end the current TXN sending TxnEndMsg to the coordinator
     void endTxn() {
         boolean doCommit = r.nextDouble() < COMMIT_PROBABILITY;
-        currentCoordinator.tell(new TxnEndMsg(clientId, doCommit), getSelf());
+        currentCoordinator.tell(new Message.TxnEndMsg(clientId, doCommit), getSelf());
         firstValue = null;
         secondValue = null;
         System.out.println("CLIENT " + clientId + " END");
@@ -178,8 +100,8 @@ public class TxnClient extends AbstractActor {
         secondKey = (firstKey + randKeyOffset) % (maxKey + 1);
 
         // READ requests
-        currentCoordinator.tell(new Coordinator.ReadMsg(clientId, firstKey), getSelf());
-        currentCoordinator.tell(new Coordinator.ReadMsg(clientId, secondKey), getSelf());
+        currentCoordinator.tell(new Message.ReadMsg(clientId, firstKey), getSelf());
+        currentCoordinator.tell(new Message.ReadMsg(clientId, secondKey), getSelf());
 
         // delete the current read values
         firstValue = null;
@@ -194,8 +116,8 @@ public class TxnClient extends AbstractActor {
         // take some amount from one value and pass it to the other, then request writes
         Integer amountTaken = 0;
         if (firstValue >= 1) amountTaken = 1 + r.nextInt(firstValue);
-        currentCoordinator.tell(new WriteMsg(clientId, firstKey, firstValue - amountTaken), getSelf());
-        currentCoordinator.tell(new WriteMsg(clientId, secondKey, secondValue + amountTaken), getSelf());
+        currentCoordinator.tell(new Message.WriteMsg(clientId, firstKey, firstValue - amountTaken), getSelf());
+        currentCoordinator.tell(new Message.WriteMsg(clientId, secondKey, secondValue + amountTaken), getSelf());
         System.out.println("CLIENT " + clientId + " WRITE #" + numOpDone
                 + " taken " + amountTaken
                 + " (" + firstKey + ", " + (firstValue - amountTaken) + "), ("
@@ -204,28 +126,28 @@ public class TxnClient extends AbstractActor {
 
     /*-- Message handlers ----------------------------------------------------- */
 
-    private void onWelcomeMsg(WelcomeMsg msg) {
+    private void onWelcomeMsg(Message.WelcomeMsg msg) {
         this.coordinators = msg.coordinators;
 //        System.out.println(coordinators);
         this.maxKey = msg.maxKey;
         beginTxn();
     }
 
-    private void onStopMsg(StopMsg msg) {
+    private void onStopMsg(Message.StopMsg msg) {
         getContext().stop(getSelf());
     }
 
-    private void onTxnAcceptMsg(TxnAcceptMsg msg) {
+    private void onTxnAcceptMsg(Message.TxnAcceptMsg msg) {
         acceptedTxn = true;
         acceptTimeout.cancel();
         readTwo();
     }
 
-    private void onTxnAcceptTimeoutMsg(TxnAcceptTimeoutMsg msg) {
+    private void onTxnAcceptTimeoutMsg(Message.TxnAcceptTimeoutMsg msg) {
         if (!acceptedTxn) beginTxn();
     }
 
-    private void onReadResultMsg(ReadResultMsg msg) {
+    private void onReadResultMsg(Message.ReadResultMsg msg) {
         System.out.println("CLIENT " + clientId + " READ RESULT (" + msg.key + ", " + msg.value + ")");
 
         // save the read value(s)
@@ -249,7 +171,7 @@ public class TxnClient extends AbstractActor {
         }
     }
 
-    private void onTxnResultMsg(TxnResultMsg msg) {
+    private void onTxnResultMsg(Message.TxnResultMsg msg) {
         if (msg.commit) {
             numCommittedTxn++;
             System.out.println("CLIENT " + clientId + " COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
@@ -262,12 +184,12 @@ public class TxnClient extends AbstractActor {
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-                .match(WelcomeMsg.class, this::onWelcomeMsg)
-                .match(TxnAcceptMsg.class, this::onTxnAcceptMsg)
-                .match(TxnAcceptTimeoutMsg.class, this::onTxnAcceptTimeoutMsg)
-                .match(ReadResultMsg.class, this::onReadResultMsg)
-                .match(TxnResultMsg.class, this::onTxnResultMsg)
-                .match(StopMsg.class, this::onStopMsg)
+                .match(Message.WelcomeMsg.class, this::onWelcomeMsg)
+                .match(Message.TxnAcceptMsg.class, this::onTxnAcceptMsg)
+                .match(Message.TxnAcceptTimeoutMsg.class, this::onTxnAcceptTimeoutMsg)
+                .match(Message.ReadResultMsg.class, this::onReadResultMsg)
+                .match(Message.TxnResultMsg.class, this::onTxnResultMsg)
+                .match(Message.StopMsg.class, this::onStopMsg)
                 .build();
     }
 }

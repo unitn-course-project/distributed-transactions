@@ -6,9 +6,9 @@ import java.util.HashMap;
 import java.util.List;
 
 public class Main {
-    final static int N_COORDINATORS = 3;
-    final static int N_CLIENT = 5;
-    final static int N_SERVER = 5;
+    final static int N_COORDINATORS = 1;
+    final static int N_CLIENT = 2;
+    final static int N_SERVER = 2;
 
     public static void main(String[] args) {
         final ActorSystem system = ActorSystem.create("distributed-transactions");
@@ -35,7 +35,7 @@ public class Main {
             clients.add(system.actorOf(TxnClient.props(i), "client-" + i));
         }
 
-        TxnClient.WelcomeMsg start = new TxnClient.WelcomeMsg(N_SERVER*10-1, coordinators);
+        Message.WelcomeMsg start = new Message.WelcomeMsg(N_SERVER*10-1, coordinators);
         for (ActorRef c : clients) {
             c.tell(start, null);
         }
