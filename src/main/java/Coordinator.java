@@ -5,18 +5,17 @@ import akka.actor.Props;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Set;
 import java.util.UUID;
 
 public class Coordinator extends AbstractActor {
     protected int id;
     protected HashMap<Integer, ActorRef> mapDataStoreByKey;
-    private HashMap<String, ActorRef> mapTransaction2Client;
-    private HashMap<ActorRef, String> mapClient2Transaction;
-    private HashMap<String, HashSet<ActorRef>> yesVoters;
-    private HashMap<String, Boolean> mapTransaction2Decision;
-    private int checkSum;
-    private Set<ActorRef> checkSumResponse;
+    private final HashMap<String, ActorRef> mapTransaction2Client;
+    private final HashMap<ActorRef, String> mapClient2Transaction;
+    private final HashMap<String, HashSet<ActorRef>> yesVoters;
+    private final HashMap<String, Boolean> mapTransaction2Decision;
+    private final HashMap<String, Integer> checkSum;
+    private final HashMap<String, HashSet<ActorRef>> checkSumResponse;
 
     public Coordinator(int id, HashMap<Integer, ActorRef> map) {
         super();
@@ -26,6 +25,8 @@ public class Coordinator extends AbstractActor {
         mapClient2Transaction = new HashMap<>();
         mapTransaction2Decision = new HashMap<>();
         yesVoters = new HashMap<>();
+        checkSum = new HashMap<>();
+        checkSumResponse = new HashMap<>();
     }
 
     static public Props props(int id, HashMap<Integer, ActorRef> map) {
@@ -39,8 +40,6 @@ public class Coordinator extends AbstractActor {
         mapClient2Transaction.put(client, transactionId);
         client.tell(new Message.TxnAcceptMsg(), getSelf());
         System.out.println("Coordinator-" + this.id + " ACCEPT txn begin from " + client + " with transactionId=" + transactionId);
-//        System.out.println(mapTransaction2Client.toString());
-//        System.out.println(mapClient2Transaction.toString());
     }
 
     private void onReadMsg(Message.ReadMsg msg) {
@@ -65,9 +64,17 @@ public class Coordinator extends AbstractActor {
     }
 
     private void onTxnEndMsg(Message.TxnEndMsg msg) {
-        System.out.println(mapClient2Transaction.get(getSender()) + " beginTxnEndMsg ------->>>>>>>");
-        yesVoters.put(mapClient2Transaction.get(getSender()), new HashSet<>());
-        multicast(new Message.VoteRequestMsg(mapClient2Transaction.get(getSender())));
+        if (msg.commit) {
+            System.out.println(mapClient2Transaction.get(getSender()) + " beginTxnEndMsg ------->>>>>>>");
+            yesVoters.put(mapClient2Transaction.get(getSender()), new HashSet<>());
+            multicast(new Message.VoteRequestMsg(mapClient2Transaction.get(getSender())));
+        } else {
+            String transactionId = mapClient2Transaction.get(getSender());
+            fixDecision(transactionId, false);
+            multicast(new Message.DecisionMsg(transactionId, mapTransaction2Decision.get(transactionId)));
+            System.out.println(transactionId + " abort by itself -> tellDecision2Client ------>>>>>>>>");
+            tellDecision2Client(transactionId);
+        }
     }
 
     private void onVoteResponseMsg(Message.VoteResponseMsg msg) {
@@ -78,12 +85,14 @@ public class Coordinator extends AbstractActor {
                 tranYesVoters.add(getSender());
                 yesVoters.put(msg.transactionId, tranYesVoters);
                 if (allVotedYes(msg.transactionId)) {
+                    checkConsistent(msg.transactionId);
                     fixDecision(msg.transactionId, true);
                     multicast(new Message.DecisionMsg(msg.transactionId, mapTransaction2Decision.get(msg.transactionId)));
                     System.out.println(msg.transactionId + " allVoteYes -> tellDecision2Client ------>>>>>>>>");
                     tellDecision2Client(msg.transactionId);
                 }
             } else {
+                checkConsistent(msg.transactionId);
                 fixDecision(msg.transactionId, false);
                 multicast(new Message.DecisionMsg(msg.transactionId, mapTransaction2Decision.get(msg.transactionId)));
                 System.out.println(msg.transactionId + " existing voteNo -> tellDecision2Client ------>>>>>>>>");
@@ -92,18 +101,22 @@ public class Coordinator extends AbstractActor {
         }
     }
 
+
     //TODO modify implementation
-    private void onCheckConsistentMsg(Message.CheckConsistentRequest msg){
-        multicast(msg);
-        checkSum = 0;
-        checkSumResponse = new HashSet<>();
+    private void checkConsistent(String transactionId) {
+        checkSum.put(transactionId, 0);
+        checkSumResponse.put(transactionId, new HashSet<>());
+        multicast(new Message.CheckConsistentRequest(transactionId));
     }
 
-    private void onCheckConsistentResponseMsg(Message.CheckConsistentResponse msg){
-        checkSumResponse.add(getSender());
-        checkSum += msg.sum;
-        if(checkSumResponse.size() == mapDataStoreByKey.size()){
-            System.out.println(">>>>>>>>>>>>>> checkSum = "+checkSum+" <<<<<<<<<<<<<<<");
+    private void onCheckConsistentResponseMsg(Message.CheckConsistentResponse msg) {
+        HashSet<ActorRef> voterCheck = checkSumResponse.get(msg.transactionId);
+        voterCheck.add(getSender());
+        checkSumResponse.put(msg.transactionId, voterCheck);
+        int votedSum = checkSum.get(msg.transactionId);
+        checkSum.put(msg.transactionId, votedSum + msg.sum);
+        if (checkSumResponse.get(msg.transactionId).size() == mapDataStoreByKey.size()) {
+            System.out.println(">>>>>>>>>>>>>> " + msg.transactionId + " checkSum = " + checkSum.get(msg.transactionId) + " <<<<<<<<<<<<<<<");
         }
     }
 
@@ -147,7 +160,6 @@ public class Coordinator extends AbstractActor {
                 .match(Message.WriteMsg.class, this::onWriteMsg)
                 .match(Message.TxnEndMsg.class, this::onTxnEndMsg)
                 .match(Message.VoteResponseMsg.class, this::onVoteResponseMsg)
-                .match(Message.CheckConsistentRequest.class, this::onCheckConsistentMsg)
                 .match(Message.CheckConsistentResponse.class, this::onCheckConsistentResponseMsg)
                 .build();
     }

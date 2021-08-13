@@ -53,7 +53,7 @@ public class DataStore extends AbstractActor {
         this.id = id;
         this.data = data;
         this.transactionWorkspace = new HashMap<>();
-        this.workspace = new HashMap<String, HashMap<Integer, Value>>();
+        this.workspace = new HashMap<>();
         constructValidationLock();
     }
 
@@ -81,7 +81,11 @@ public class DataStore extends AbstractActor {
                 value = data.get(msg.key).getValue();
             }
         }else{
-            value = data.get(msg.key).getValue();
+            Value modifyingValue = data.get(msg.key);
+            value = modifyingValue.getValue();
+            HashMap<Integer, Value> modifyingWorkspace = new HashMap<>();
+            modifyingWorkspace.put(msg.key, new Value(modifyingValue.getVersion(), value));
+            workspace.put(msg.transactionId, modifyingWorkspace);
         }
         coordinator.tell(new Message.ReadResultMsg(msg.key, value, msg.transactionId), getSelf());
 //        System.out.println("onReadMsg::DataStore "+this.id+" return key="+msg.key+" value="+value);
@@ -141,9 +145,7 @@ public class DataStore extends AbstractActor {
         if (workspace.containsKey(msg.transactionId)) {
             HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
             if (msg.commit) {
-                Iterator it = modifiedWorkspace.entrySet().iterator();
-                while (it.hasNext()) {
-                    Map.Entry<Integer, Value> element = (Map.Entry<Integer, Value>) it.next();
+                for (Map.Entry<Integer, Value> element : modifiedWorkspace.entrySet()) {
                     Value updatingValue = data.get(element.getKey());
                     updatingValue.setValue(element.getValue().getValue());
                     updatingValue.setVersion(updatingValue.getVersion() + 1);
@@ -155,48 +157,42 @@ public class DataStore extends AbstractActor {
                 validationLock[key % 10] = false;
             }
         }
-//        System.out.println("========= DataStore-" + this.id + "::onDecisionMsg =========");
-//        printData();
-//        sumToCheck();
+
+        printData(msg.transactionId);
     }
 
     private void onCheckConsistentMsg(Message.CheckConsistentRequest msg){
         int sum = sumToCheck();
         ActorRef coordinator = getSender();
-        coordinator.tell(new Message.CheckConsistentResponse(sum), getSelf());
+        coordinator.tell(new Message.CheckConsistentResponse(sum, msg.transactionId), getSelf());
     }
 
-    private void printData(){
-        String printResult = "";
-        Iterator it = data.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<Integer, Value> element = (Map.Entry<Integer, Value>) it.next();
-            printResult += (element.getKey() + ": "+element.getValue().toString()+"\n");
+    private void printData(String transactionId){
+        StringBuilder printResult = new StringBuilder("========= DataStore-" + this.id + " with " + transactionId + " =========\n");
+        for (Map.Entry<Integer, Value> element : data.entrySet()) {
+            printResult.append(element.getKey()).append(": ").append(element.getValue().toString()).append("\n");
         }
+        printResult.append("======>>>>>> sum = ").append(sumToCheck());
         System.out.println(printResult);
     }
 
-    private void printWorkspace() {
-        String printResult = "";
-        Iterator it = workspace.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry element = (Map.Entry) it.next();
-            printResult += (element.getKey() + ":\n");
-            HashMap<Integer, Value> tWorkspace = (HashMap<Integer, Value>) element.getValue();
-            Iterator tIter = tWorkspace.entrySet().iterator();
-            while (tIter.hasNext()) {
-                Map.Entry tElement = (Map.Entry) tIter.next();
-                printResult += ("\t" + tElement.getKey() + ": " + tElement.getValue().toString() + "\n");
-            }
-        }
-        System.out.println(printResult);
-    }
+//    private void printWorkspace() {
+//        String printResult = "";
+//        for (Map.Entry<String, HashMap<Integer, Value>> stringHashMapEntry : workspace.entrySet()) {
+//            printResult += (stringHashMapEntry.getKey() + ":\n");
+//            HashMap<Integer, Value> tWorkspace = stringHashMapEntry.getValue();
+//            for (Map.Entry<Integer, Value> integerValueEntry : tWorkspace.entrySet()) {
+//                printResult += ("\t" + integerValueEntry.getKey() + ": " + integerValueEntry.getValue().toString() + "\n");
+//            }
+//        }
+//        System.out.println(printResult);
+//    }
 
     private int sumToCheck(){
-        Iterator it = data.entrySet().iterator();
+        Iterator<Map.Entry<Integer, Value>> it = data.entrySet().iterator();
         int sum = 0;
         while (it.hasNext()) {
-            Map.Entry<Integer, Value> element = (Map.Entry<Integer, Value>) it.next();
+            Map.Entry<Integer, Value> element = it.next();
             sum += element.getValue().getValue();
         }
         return sum;

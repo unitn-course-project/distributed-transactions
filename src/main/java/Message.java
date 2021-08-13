@@ -143,13 +143,20 @@ public class Message {
         }
     }
 
-    public static class CheckConsistentRequest implements Serializable{}
+    public static class CheckConsistentRequest implements Serializable{
+        public String transactionId;
+
+        public CheckConsistentRequest(String transactionId){
+            this.transactionId = transactionId;
+        }
+    }
 
     public static class CheckConsistentResponse implements Serializable{
         public final int sum;
-
-        public CheckConsistentResponse(int sum){
+        public final String transactionId;
+        public CheckConsistentResponse(int sum, String transactionId){
             this.sum = sum;
+            this.transactionId = transactionId;
         }
     }
 }

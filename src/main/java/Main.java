@@ -6,8 +6,8 @@ import java.util.HashMap;
 import java.util.List;
 
 public class Main {
-    final static int N_COORDINATORS = 3;
-    final static int N_CLIENT = 5;
+    final static int N_COORDINATORS = 2;
+    final static int N_CLIENT = 7;
     final static int N_SERVER = 5;
 
     public static void main(String[] args) {
