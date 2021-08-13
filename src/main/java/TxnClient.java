@@ -79,7 +79,7 @@ public class TxnClient extends AbstractActor {
                 new Message.TxnAcceptTimeoutMsg(), // message sent to myself
                 getContext().system().dispatcher(), getSelf()
         );
-        System.out.println("CLIENT " + clientId + " BEGIN");
+//        System.out.println("CLIENT " + clientId + " BEGIN");
     }
 
     // end the current TXN sending TxnEndMsg to the coordinator
@@ -88,7 +88,7 @@ public class TxnClient extends AbstractActor {
         currentCoordinator.tell(new Message.TxnEndMsg(clientId, doCommit), getSelf());
         firstValue = null;
         secondValue = null;
-        System.out.println("CLIENT " + clientId + " END");
+//        System.out.println("CLIENT " + clientId + " END");
     }
 
     // READ two items (will move some amount from the value of the first to the second)
@@ -148,7 +148,7 @@ public class TxnClient extends AbstractActor {
     }
 
     private void onReadResultMsg(Message.ReadResultMsg msg) {
-        System.out.println("CLIENT " + clientId + " READ RESULT (" + msg.key + ", " + msg.value + ")");
+//        System.out.println("CLIENT " + clientId + " READ RESULT (" + msg.key + ", " + msg.value + ")");
 
         // save the read value(s)
         if (msg.key.equals(firstKey)) firstValue = msg.value;
@@ -172,13 +172,16 @@ public class TxnClient extends AbstractActor {
     }
 
     private void onTxnResultMsg(Message.TxnResultMsg msg) {
+        this.currentCoordinator.tell(new Message.CheckConsistentRequest(), getSelf());
         if (msg.commit) {
             numCommittedTxn++;
             System.out.println("CLIENT " + clientId + " COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
         } else {
             System.out.println("CLIENT " + clientId + " COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
         }
-        beginTxn();
+        if(numAttemptedTxn < 5){
+            beginTxn();
+        }
     }
 
     @Override

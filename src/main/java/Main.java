@@ -6,9 +6,9 @@ import java.util.HashMap;
 import java.util.List;
 
 public class Main {
-    final static int N_COORDINATORS = 1;
-    final static int N_CLIENT = 2;
-    final static int N_SERVER = 2;
+    final static int N_COORDINATORS = 3;
+    final static int N_CLIENT = 5;
+    final static int N_SERVER = 5;
 
     public static void main(String[] args) {
         final ActorSystem system = ActorSystem.create("distributed-transactions");

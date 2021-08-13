@@ -132,4 +132,24 @@ public class Message {
             this.commit = commit;
         }
     }
+
+    public static class DecisionMsg implements Serializable{
+        public final boolean commit;
+        public String transactionId;
+
+        public DecisionMsg(String transactionId, boolean commit){
+            this.transactionId = transactionId;
+            this.commit = commit;
+        }
+    }
+
+    public static class CheckConsistentRequest implements Serializable{}
+
+    public static class CheckConsistentResponse implements Serializable{
+        public final int sum;
+
+        public CheckConsistentResponse(int sum){
+            this.sum = sum;
+        }
+    }
 }

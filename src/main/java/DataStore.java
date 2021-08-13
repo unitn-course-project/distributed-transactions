@@ -1,9 +1,11 @@
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import com.sun.xml.internal.bind.v2.TODO;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
 
 public class DataStore extends AbstractActor {
     protected int id;
@@ -55,11 +57,11 @@ public class DataStore extends AbstractActor {
         constructValidationLock();
     }
 
-    private void constructValidationLock(){
+    private void constructValidationLock() {
         Set<Integer> listKey = data.keySet();
         validationLock = new boolean[listKey.size()];
-        for(Integer k : listKey){
-            validationLock[k%10] = false;
+        for (Integer k : listKey) {
+            validationLock[k % 10] = false;
         }
     }
 
@@ -69,77 +71,135 @@ public class DataStore extends AbstractActor {
 
     private void onReadMsg(Message.ReadMsg msg) {
         ActorRef coordinator = getSender();
-        int value = data.get(msg.key).getValue();
+        int value;
+        if(workspace.containsKey(msg.transactionId)){
+            HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
+            if(modifiedWorkspace.containsKey(msg.key)) {
+                value = modifiedWorkspace.get(msg.key).getValue();
+            }
+            else {
+                value = data.get(msg.key).getValue();
+            }
+        }else{
+            value = data.get(msg.key).getValue();
+        }
         coordinator.tell(new Message.ReadResultMsg(msg.key, value, msg.transactionId), getSelf());
 //        System.out.println("onReadMsg::DataStore "+this.id+" return key="+msg.key+" value="+value);
     }
 
-    private void onWriteMsg(Message.WriteMsg msg){
-        if(workspace.containsKey(msg.transactionID)){
+    private void onWriteMsg(Message.WriteMsg msg) {
+        if (workspace.containsKey(msg.transactionID)) {
             HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionID);
-            if(modifiedWorkspace.containsKey(msg.key)){
+            if (modifiedWorkspace.containsKey(msg.key)) {
                 Value modifiedValue = modifiedWorkspace.get(msg.key);
                 modifiedValue.setValue(msg.value);
                 modifiedWorkspace.put(msg.key, modifiedValue);
-            }else{
+            } else {
                 Value modifyingValue = data.get(msg.key);
                 modifiedWorkspace.put(msg.key, new Value(modifyingValue.getVersion(), msg.value));
             }
-        }else{
+        } else {
             Value modifyingValue = data.get(msg.key);
             HashMap<Integer, Value> modifyingWorkspace = new HashMap<>();
             modifyingWorkspace.put(msg.key, new Value(modifyingValue.getVersion(), msg.value));
             workspace.put(msg.transactionID, modifyingWorkspace);
         }
-        System.out.println("========= DataStore-"+this.id+"::onWriteMsg =========");
-        printWorkspace();
+//        System.out.println("========= DataStore-" + this.id + "::onWriteMsg =========");
+//        printWorkspace();
     }
 
-    private void onVoteRequestMsg(Message.VoteRequestMsg msg){
+    private void onVoteRequestMsg(Message.VoteRequestMsg msg) {
         ActorRef coordinator = getSender();
 
-        if(!workspace.containsKey(msg.transactionId)) {
+        if (!workspace.containsKey(msg.transactionId)) {
+            System.out.println("DataStore-"+this.id+" does not contain "+msg.transactionId);
             coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, true), getSelf());
-        }else{
+        } else {
             HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
-            for(Integer key: modifiedWorkspace.keySet()){
-                if(validationLock[key%10]){
+            for (Integer key : modifiedWorkspace.keySet()) {
+                if (validationLock[key % 10]) {
+                    System.out.println("DataStore-"+this.id+" "+msg.transactionId+" modify when validating");
                     coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, false), getSelf());
                     return;
                 }
-                validationLock[key%10] = true;
+                validationLock[key % 10] = true;
             }
 
             boolean canCommit = true;
-            for(Integer key: modifiedWorkspace.keySet()){
-                if(data.get(key).getVersion() != modifiedWorkspace.get(key).getVersion()){
+            for (Integer key : modifiedWorkspace.keySet()) {
+                if (data.get(key).getVersion() != modifiedWorkspace.get(key).getVersion()) {
                     canCommit = false;
                     break;
                 }
             }
+            System.out.println("DataStore-"+this.id+" "+msg.transactionId+" canCommit="+canCommit);
             coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, canCommit), getSelf());
-
-            //TODO MOVE TO COMMIT PHASE
-            for(Integer key: modifiedWorkspace.keySet()){
-                validationLock[key%10] = false;
-            }
         }
     }
 
-    private void printWorkspace(){
+    private void onDecisionMsg(Message.DecisionMsg msg) {
+        if (workspace.containsKey(msg.transactionId)) {
+            HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
+            if (msg.commit) {
+                Iterator it = modifiedWorkspace.entrySet().iterator();
+                while (it.hasNext()) {
+                    Map.Entry<Integer, Value> element = (Map.Entry<Integer, Value>) it.next();
+                    Value updatingValue = data.get(element.getKey());
+                    updatingValue.setValue(element.getValue().getValue());
+                    updatingValue.setVersion(updatingValue.getVersion() + 1);
+                }
+            }
+            workspace.remove(msg.transactionId);
+
+            for (Integer key : modifiedWorkspace.keySet()) {
+                validationLock[key % 10] = false;
+            }
+        }
+//        System.out.println("========= DataStore-" + this.id + "::onDecisionMsg =========");
+//        printData();
+//        sumToCheck();
+    }
+
+    private void onCheckConsistentMsg(Message.CheckConsistentRequest msg){
+        int sum = sumToCheck();
+        ActorRef coordinator = getSender();
+        coordinator.tell(new Message.CheckConsistentResponse(sum), getSelf());
+    }
+
+    private void printData(){
+        String printResult = "";
+        Iterator it = data.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Integer, Value> element = (Map.Entry<Integer, Value>) it.next();
+            printResult += (element.getKey() + ": "+element.getValue().toString()+"\n");
+        }
+        System.out.println(printResult);
+    }
+
+    private void printWorkspace() {
         String printResult = "";
         Iterator it = workspace.entrySet().iterator();
-        while(it.hasNext()){
+        while (it.hasNext()) {
             Map.Entry element = (Map.Entry) it.next();
             printResult += (element.getKey() + ":\n");
             HashMap<Integer, Value> tWorkspace = (HashMap<Integer, Value>) element.getValue();
             Iterator tIter = tWorkspace.entrySet().iterator();
-            while (tIter.hasNext()){
+            while (tIter.hasNext()) {
                 Map.Entry tElement = (Map.Entry) tIter.next();
-                printResult += ("\t"+tElement.getKey()+": "+tElement.getValue().toString()+"\n");
+                printResult += ("\t" + tElement.getKey() + ": " + tElement.getValue().toString() + "\n");
             }
         }
         System.out.println(printResult);
+    }
+
+    private int sumToCheck(){
+        Iterator it = data.entrySet().iterator();
+        int sum = 0;
+        while (it.hasNext()) {
+            Map.Entry<Integer, Value> element = (Map.Entry<Integer, Value>) it.next();
+            sum += element.getValue().getValue();
+        }
+        return sum;
     }
 
     @Override
@@ -148,6 +208,8 @@ public class DataStore extends AbstractActor {
                 .match(Message.ReadMsg.class, this::onReadMsg)
                 .match(Message.WriteMsg.class, this::onWriteMsg)
                 .match(Message.VoteRequestMsg.class, this::onVoteRequestMsg)
+                .match(Message.DecisionMsg.class, this::onDecisionMsg)
+                .match(Message.CheckConsistentRequest.class, this::onCheckConsistentMsg)
                 .build();
     }
 }
