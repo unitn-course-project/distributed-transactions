@@ -127,6 +127,8 @@ public class TxnCoordinator extends AbstractActor {
 
     data.put(readDataResultMsg.key, rowValue);
     privateWorkspace.setData(data);
+    // remove transaction from wait List
+    waitList.remove(readDataResultMsg.transactionId);
     // tell client result
     client.tell(new ReadResultMsg(readDataResultMsg.key, readDataResultMsg.value), getSelf());
   }
