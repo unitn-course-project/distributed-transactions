@@ -34,14 +34,14 @@ public class TxnSystem {
 
     List<ActorRef> clients = new ArrayList<>();
     for (int i = 0; i < N_CLIENTS; i++) {
-      servers.add(system.actorOf(TxnClient.props(i), "client" + i));
+      clients.add(system.actorOf(TxnClient.props(i), "client" + i));
     }
 
     StartMsg startMsg = new StartMsg(servers);
     for (ActorRef coordinator : coordinators)
       coordinator.tell(startMsg, ActorRef.noSender());
 
-    WelcomeMsg welcomeMsg = new WelcomeMsg(N_SERVERS * 10, coordinators);
+    WelcomeMsg welcomeMsg = new WelcomeMsg(N_SERVERS * 10-1, coordinators);
     for (ActorRef client : clients)
       client.tell(welcomeMsg, ActorRef.noSender());
 
