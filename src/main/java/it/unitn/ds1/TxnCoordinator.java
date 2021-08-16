@@ -17,6 +17,9 @@ import it.unitn.ds1.TxnClient.ReadMsg;
 import it.unitn.ds1.TxnClient.ReadResultMsg;
 import it.unitn.ds1.TxnClient.TxnAcceptMsg;
 import it.unitn.ds1.TxnClient.TxnBeginMsg;
+import it.unitn.ds1.TxnClient.TxnEndMsg;
+import it.unitn.ds1.TxnClient.TxnResultMsg;
+import it.unitn.ds1.TxnClient.WriteMsg;
 import it.unitn.ds1.model.PrivateWorkspace;
 import it.unitn.ds1.model.RowValue;
 
@@ -32,9 +35,9 @@ public class TxnCoordinator extends AbstractActor {
   private List<Integer> processingClientIds;
   private Map<Integer, String> currentTransaction;
   private Map<String, Integer> mapCurrentTransaction;
+  private Map<String, ActorRef> mapCurrentTransactionActor;
   private Map<String, PrivateWorkspace> processingPrivateWorkspace;
 
-  private Map<String, ActorRef> waitList;
 
   public TxnCoordinator(int id) {
     this.id = id;
@@ -47,10 +50,10 @@ public class TxnCoordinator extends AbstractActor {
   @Override
   public void preStart() {
     processingClientIds = new ArrayList<>();
-    mapCurrentTransaction= new HashMap<>();
+    mapCurrentTransaction = new HashMap<>();
     currentTransaction = new HashMap<>();
     processingPrivateWorkspace = new HashMap<>();
-    waitList = new HashMap<>();
+    mapCurrentTransactionActor = new HashMap<>();
   }
 
   /*-- Message classes ------------------------------------------------------ */
@@ -99,38 +102,79 @@ public class TxnCoordinator extends AbstractActor {
     String transactionId = UUID.randomUUID().toString();
     currentTransaction.put(txnBeginMsg.clientId, transactionId);
     mapCurrentTransaction.put(transactionId, txnBeginMsg.clientId);
-    //init private workspace
+    mapCurrentTransactionActor.put(transactionId, getSender());
+    // init private workspace
     processingPrivateWorkspace.put(transactionId, new PrivateWorkspace());
     ActorRef sender = getSender();
     sender.tell(new TxnAcceptMsg(), getSelf());
   }
 
+  private void onWriteMsg(WriteMsg writeMsg) {
+    Integer clientId = writeMsg.clientId;
+    RowValue readValue = null;
+    String transactionId = currentTransaction.get(clientId);
+    readValue = getDataFromPrivateWorkSpace(writeMsg.key, transactionId);
+
+    PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(transactionId);
+    RowValue rowValue = privateWorkspace.getData().get(writeMsg.key);
+    rowValue.setValue(writeMsg.value);
+    Map<Integer, RowValue> data = privateWorkspace.getData();
+    data.put(writeMsg.key, rowValue);
+    privateWorkspace.setData(data);
+  }
+
   private void onReadMsg(ReadMsg readMsg) {
     Integer clientId = readMsg.clientId;
     RowValue readValue = null;
-    String transactionId= currentTransaction.get(clientId);
+    String transactionId = currentTransaction.get(clientId);
     if (exitsInPrivateWorkSpace(readMsg.key, transactionId)) {
       readValue = getDataFromPrivateWorkSpace(readMsg.key, transactionId);
       getSender().tell(new ReadResultMsg(readMsg.key, readValue.getValue()), getSelf());
     } else {
+      mapCurrentTransactionActor.put(transactionId, getSender());
       getDataByKey(readMsg.key, transactionId);
     }
 
   }
 
+  private void onEndTxnMsg(TxnEndMsg endMsg) {
+    if (validationPhase())
+      getSender().tell(new TxnResultMsg(true), getSelf());
+    else
+      getSender().tell(new TxnResultMsg(false), getSelf());
+
+    PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(currentTransaction.get(endMsg.clientId));
+    Map<Integer, RowValue> data = privateWorkspace.getData();
+    for (int key : data.keySet()) {
+      getServerByKey(key).tell(new WriteMsg(endMsg.clientId, key, data.get(key).getValue()), getSelf());
+    }
+    clearPrivateWorkspace(currentTransaction.get(endMsg.clientId));
+  }
+
+  /**
+   * Handle result from server for read operator
+   * 
+   * @param readDataResultMsg
+   */
   private void onReadResultMsg(ReadDataResultMsg readDataResultMsg) {
-    ActorRef client = waitList.get(readDataResultMsg.transactionId);
+    ActorRef client = mapCurrentTransactionActor.get(readDataResultMsg.transactionId);
     // update private workspace
     PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(readDataResultMsg.transactionId);
     RowValue rowValue = new RowValue(readDataResultMsg.version, readDataResultMsg.value);
-    Map<Integer,RowValue> data=privateWorkspace.getData();
+    Map<Integer, RowValue> data = privateWorkspace.getData();
 
     data.put(readDataResultMsg.key, rowValue);
     privateWorkspace.setData(data);
-    // remove transaction from wait List
-    waitList.remove(readDataResultMsg.transactionId);
     // tell client result
     client.tell(new ReadResultMsg(readDataResultMsg.key, readDataResultMsg.value), getSelf());
+  }
+
+  private void updatePhase() {
+
+  }
+
+  private boolean validationPhase() {
+    return true;
   }
 
   /**
@@ -142,7 +186,6 @@ public class TxnCoordinator extends AbstractActor {
 
   private void getDataByKey(Integer key, String transactionId) {
     ActorRef server = getServerByKey(key);
-    waitList.put(transactionId, getSender());
     server.tell(new ReadDataMsg(transactionId, key), getSelf());
   }
 
@@ -171,6 +214,14 @@ public class TxnCoordinator extends AbstractActor {
     return false;
   }
 
+  private void clearPrivateWorkspace(String transactionId) {
+    Integer clientId = mapCurrentTransaction.get(transactionId);
+    currentTransaction.remove(clientId);
+    mapCurrentTransaction.remove(transactionId);
+    processingPrivateWorkspace.remove(transactionId);
+    processingClientIds.remove(processingClientIds.indexOf(clientId));
+  }
+
   private ActorRef getServerByKey(Integer key) {
     return servers.get(key / 10);
   }
@@ -179,7 +230,8 @@ public class TxnCoordinator extends AbstractActor {
   public Receive createReceive() {
     // TODO Auto-generated method stub
     return receiveBuilder().match(StartMsg.class, this::onStartMsg).match(TxnBeginMsg.class, this::onBeginTxnMsg)
-        .match(ReadMsg.class, this::onReadMsg).match(ReadDataResultMsg.class, this::onReadResultMsg).build();
+        .match(ReadMsg.class, this::onReadMsg).match(ReadDataResultMsg.class, this::onReadResultMsg)
+        .match(WriteMsg.class, this::onWriteMsg).match(TxnEndMsg.class, this::onEndTxnMsg).build();
   }
 
 }
