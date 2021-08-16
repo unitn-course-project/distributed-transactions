@@ -1,4 +1,3 @@
-import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 
@@ -7,13 +6,13 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.UUID;
 
-public class Coordinator extends AbstractActor {
+public class Coordinator extends Server {
     protected int id;
     protected HashMap<Integer, ActorRef> mapDataStoreByKey;
     private final HashMap<String, ActorRef> mapTransaction2Client;
     private final HashMap<ActorRef, String> mapClient2Transaction;
     private final HashMap<String, HashSet<ActorRef>> yesVoters;
-    private final HashMap<String, Boolean> mapTransaction2Decision;
+    //    private final HashMap<String, Boolean> mapTransaction2Decision;
     private final HashMap<String, Integer> checkSum;
     private final HashMap<String, HashSet<ActorRef>> checkSumResponse;
 
@@ -23,7 +22,7 @@ public class Coordinator extends AbstractActor {
         this.mapDataStoreByKey = map;
         mapTransaction2Client = new HashMap<>();
         mapClient2Transaction = new HashMap<>();
-        mapTransaction2Decision = new HashMap<>();
+//        mapTransaction2Decision = new HashMap<>();
         yesVoters = new HashMap<>();
         checkSum = new HashMap<>();
         checkSumResponse = new HashMap<>();
@@ -39,7 +38,7 @@ public class Coordinator extends AbstractActor {
         mapTransaction2Client.put(transactionId, client);
         mapClient2Transaction.put(client, transactionId);
         client.tell(new Message.TxnAcceptMsg(), getSelf());
-        System.out.println("Coordinator-" + this.id + " ACCEPT txn begin from " + client + " with transactionId=" + transactionId);
+//        System.out.println("Coordinator-" + this.id + " ACCEPT txn begin from " + client + " with transactionId=" + transactionId);
     }
 
     private void onReadMsg(Message.ReadMsg msg) {
@@ -64,10 +63,16 @@ public class Coordinator extends AbstractActor {
     }
 
     private void onTxnEndMsg(Message.TxnEndMsg msg) {
+        mapTransaction2Decision.put(mapClient2Transaction.get(getSender()), null);
         if (msg.commit) {
-            System.out.println(mapClient2Transaction.get(getSender()) + " beginTxnEndMsg ------->>>>>>>");
+            System.out.println(mapClient2Transaction.get(getSender()) + " beginTxnEndMsg at "+getSelf().toString()+"------->>>>>>>");
             yesVoters.put(mapClient2Transaction.get(getSender()), new HashSet<>());
-            multicast(new Message.VoteRequestMsg(mapClient2Transaction.get(getSender())));
+            if(r.nextDouble() > CRASH_PROBABILITY_1){
+                multicast(new Message.VoteRequestMsg(mapClient2Transaction.get(getSender())));
+            }else{
+                multicastAndCrash(new Message.VoteRequestMsg(mapClient2Transaction.get(getSender())), 3000);
+            }
+
         } else {
             String transactionId = mapClient2Transaction.get(getSender());
             fixDecision(transactionId, false);
@@ -80,29 +85,39 @@ public class Coordinator extends AbstractActor {
     private void onVoteResponseMsg(Message.VoteResponseMsg msg) {
         //Check if already send decision to client and server
         if (mapTransaction2Client.containsKey(msg.transactionId)) {
+//            if (mapTransaction2Decision.get(msg.transactionId) != null)
+//                return;
             if (msg.commit) {
                 HashSet<ActorRef> tranYesVoters = yesVoters.get(msg.transactionId);
                 tranYesVoters.add(getSender());
                 yesVoters.put(msg.transactionId, tranYesVoters);
                 if (allVotedYes(msg.transactionId)) {
-                    checkConsistent(msg.transactionId);
                     fixDecision(msg.transactionId, true);
-                    multicast(new Message.DecisionMsg(msg.transactionId, mapTransaction2Decision.get(msg.transactionId)));
-                    System.out.println(msg.transactionId + " allVoteYes -> tellDecision2Client ------>>>>>>>>");
-                    tellDecision2Client(msg.transactionId);
+                    if (r.nextDouble() > CRASH_PROBABILITY_2) {
+                        decideChange(msg.transactionId);
+                    } else {
+                        multicastAndCrash(new Message.DecisionMsg(msg.transactionId, mapTransaction2Decision.get(msg.transactionId)), 3000);
+                    }
+                    System.out.println(msg.transactionId + " allVoteYes -> tellDecision2Client from " + getSelf().toString() + " ------>>>>>>>>");
                 }
             } else {
-                checkConsistent(msg.transactionId);
                 fixDecision(msg.transactionId, false);
-                multicast(new Message.DecisionMsg(msg.transactionId, mapTransaction2Decision.get(msg.transactionId)));
+                if(r.nextDouble() > CRASH_PROBABILITY_2) {
+                    decideChange(msg.transactionId);
+                }else{
+                    multicastAndCrash(new Message.DecisionMsg(msg.transactionId, mapTransaction2Decision.get(msg.transactionId)), 3000);
+                }
                 System.out.println(msg.transactionId + " existing voteNo -> tellDecision2Client ------>>>>>>>>");
-                tellDecision2Client(msg.transactionId);
             }
         }
     }
 
+    private void decideChange(String transactionId){
+        multicast(new Message.DecisionMsg(transactionId, mapTransaction2Decision.get(transactionId)));
+        tellDecision2Client(transactionId);
+        checkConsistent(transactionId);
+    }
 
-    //TODO modify implementation
     private void checkConsistent(String transactionId) {
         checkSum.put(transactionId, 0);
         checkSumResponse.put(transactionId, new HashSet<>());
@@ -126,15 +141,17 @@ public class Coordinator extends AbstractActor {
         }
     }
 
+    void multicastAndCrash(Serializable m, int recoverIn) {
+        for (ActorRef p : mapDataStoreByKey.values()) {
+            p.tell(m, getSelf());
+            crash(recoverIn);
+            return;
+        }
+    }
+
     boolean allVotedYes(String transactionId) {
 //        System.out.println("yesVoters size = "+yesVoters.size()+" dataStore size = "+mapDataStoreByKey.size());
         return (yesVoters.get(transactionId).size() == mapDataStoreByKey.size());
-    }
-
-    void fixDecision(String transactionId, boolean commit) {
-        if (!mapTransaction2Decision.containsKey(transactionId)) {
-            mapTransaction2Decision.put(transactionId, commit);
-        }
     }
 
     void tellDecision2Client(String transactionId) {
@@ -145,9 +162,23 @@ public class Coordinator extends AbstractActor {
             mapClient2Transaction.remove(client);
             mapTransaction2Client.remove(transactionId);
             yesVoters.remove(transactionId);
-            client.tell(new Message.TxnResultMsg(txnResult), getSelf());
+            client.tell(new Message.TxnResultMsg(txnResult, transactionId), getSelf());
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    @Override
+    protected void onRecovery(Message.Recovery msg) {
+        getContext().become(createReceive());
+        for (String transactionId : mapTransaction2Decision.keySet()) {
+            if (mapTransaction2Decision.get(transactionId) == null) {
+                System.out.println(getSelf().toString()+"Recovering "+transactionId+", NOT DECIDED");
+                fixDecision(transactionId, false);
+            }else{
+                System.out.println(getSelf().toString()+"Recovering "+transactionId+" decided before crash");
+            }
+            decideChange(transactionId);
         }
     }
 

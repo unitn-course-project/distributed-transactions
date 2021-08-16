@@ -110,9 +110,11 @@ public class Message {
     // message from the coordinator to the client with the outcome of the TXN
     public static class TxnResultMsg implements Serializable {
         public final Boolean commit; // if false, the transaction was aborted
+        public final String transactionId;
 
-        public TxnResultMsg(boolean commit) {
+        public TxnResultMsg(boolean commit, String transactionId) {
             this.commit = commit;
+            this.transactionId = transactionId;
         }
     }
 
@@ -159,4 +161,6 @@ public class Message {
             this.transactionId = transactionId;
         }
     }
+
+    public static class Recovery implements Serializable{}
 }

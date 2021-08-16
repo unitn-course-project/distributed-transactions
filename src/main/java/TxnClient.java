@@ -9,10 +9,10 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 public class TxnClient extends AbstractActor {
-    private static final double COMMIT_PROBABILITY = 0.95;
+    private static final double COMMIT_PROBABILITY = 0.9;
     private static final double WRITE_PROBABILITY = 0.5;
-    private static final int MIN_TXN_LENGTH = 30;
-    private static final int MAX_TXN_LENGTH = 40;
+    private static final int MIN_TXN_LENGTH = 50;
+    private static final int MAX_TXN_LENGTH = 60;
     private static final int RAND_LENGTH_RANGE = MAX_TXN_LENGTH - MIN_TXN_LENGTH + 1;
 
     private final Integer clientId;
@@ -79,7 +79,7 @@ public class TxnClient extends AbstractActor {
                 new Message.TxnAcceptTimeoutMsg(), // message sent to myself
                 getContext().system().dispatcher(), getSelf()
         );
-        System.out.println("CLIENT " + clientId + " BEGIN");
+//        System.out.println("CLIENT " + clientId + " BEGIN");
     }
 
     // end the current TXN sending TxnEndMsg to the coordinator
@@ -88,7 +88,7 @@ public class TxnClient extends AbstractActor {
         currentCoordinator.tell(new Message.TxnEndMsg(clientId, doCommit), getSelf());
         firstValue = null;
         secondValue = null;
-        System.out.println("CLIENT " + clientId + " END");
+//        System.out.println("CLIENT " + clientId + " END");
     }
 
     // READ two items (will move some amount from the value of the first to the second)
@@ -107,7 +107,7 @@ public class TxnClient extends AbstractActor {
         firstValue = null;
         secondValue = null;
 
-        System.out.println("CLIENT " + clientId + " READ #" + numOpDone + " (" + firstKey + "), (" + secondKey + ")");
+//        System.out.println("CLIENT " + clientId + " READ #" + numOpDone + " (" + firstKey + "), (" + secondKey + ")");
     }
 
     // WRITE two items (called with probability WRITE_PROBABILITY after readTwo() values are returned)
@@ -118,10 +118,10 @@ public class TxnClient extends AbstractActor {
         if (firstValue >= 1) amountTaken = 1 + r.nextInt(firstValue);
         currentCoordinator.tell(new Message.WriteMsg(clientId, firstKey, firstValue - amountTaken), getSelf());
         currentCoordinator.tell(new Message.WriteMsg(clientId, secondKey, secondValue + amountTaken), getSelf());
-        System.out.println("CLIENT " + clientId + " WRITE #" + numOpDone
-                + " taken " + amountTaken
-                + " (" + firstKey + ", " + (firstValue - amountTaken) + "), ("
-                + secondKey + ", " + (secondValue + amountTaken) + ")");
+//        System.out.println("CLIENT " + clientId + " WRITE #" + numOpDone
+//                + " taken " + amountTaken
+//                + " (" + firstKey + ", " + (firstValue - amountTaken) + "), ("
+//                + secondKey + ", " + (secondValue + amountTaken) + ")");
     }
 
     /*-- Message handlers ----------------------------------------------------- */
@@ -174,9 +174,9 @@ public class TxnClient extends AbstractActor {
     private void onTxnResultMsg(Message.TxnResultMsg msg) {
         if (msg.commit) {
             numCommittedTxn++;
-            System.out.println("CLIENT " + clientId + " COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
+            System.out.println("Transaction " + msg.transactionId + " COMMIT OK (" + numCommittedTxn + "/" + numAttemptedTxn + ")");
         } else {
-            System.out.println("CLIENT " + clientId + " COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
+            System.out.println("Transaction " + msg.transactionId + " COMMIT FAIL (" + (numAttemptedTxn - numCommittedTxn) + "/" + numAttemptedTxn + ")");
         }
         if(numAttemptedTxn < 10){
             beginTxn();

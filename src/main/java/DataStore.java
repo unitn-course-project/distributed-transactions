@@ -1,4 +1,3 @@
-import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 
@@ -7,7 +6,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
-public class DataStore extends AbstractActor {
+public class DataStore extends Server {
     protected int id;
     protected Map<Integer, Value> data;
     protected Map<Integer, Value> transactionWorkspace;
@@ -116,13 +115,13 @@ public class DataStore extends AbstractActor {
         ActorRef coordinator = getSender();
 
         if (!workspace.containsKey(msg.transactionId)) {
-            System.out.println("DataStore-"+this.id+" does not contain "+msg.transactionId);
+//            System.out.println("DataStore-"+this.id+" does not contain "+msg.transactionId);
             coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, true), getSelf());
         } else {
             HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
             for (Integer key : modifiedWorkspace.keySet()) {
                 if (validationLock[key % 10]) {
-                    System.out.println("DataStore-"+this.id+" "+msg.transactionId+" modify when validating");
+//                    System.out.println("DataStore-"+this.id+" "+msg.transactionId+" modify when validating");
                     coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, false), getSelf());
                     return;
                 }
@@ -136,15 +135,17 @@ public class DataStore extends AbstractActor {
                     break;
                 }
             }
-            System.out.println("DataStore-"+this.id+" "+msg.transactionId+" canCommit="+canCommit);
+//            System.out.println("DataStore-"+this.id+" "+msg.transactionId+" canCommit="+canCommit);
             coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, canCommit), getSelf());
         }
     }
 
     private void onDecisionMsg(Message.DecisionMsg msg) {
+        System.out.println("onDecisionMsg::"+msg.transactionId);
         if (workspace.containsKey(msg.transactionId)) {
             HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
             if (msg.commit) {
+                System.out.println("onDecisionMsg::"+msg.transactionId+" apply change");
                 for (Map.Entry<Integer, Value> element : modifiedWorkspace.entrySet()) {
                     Value updatingValue = data.get(element.getKey());
                     updatingValue.setValue(element.getValue().getValue());
@@ -196,6 +197,11 @@ public class DataStore extends AbstractActor {
             sum += element.getValue().getValue();
         }
         return sum;
+    }
+
+    @Override
+    protected void onRecovery(Message.Recovery msg) {
+
     }
 
     @Override
