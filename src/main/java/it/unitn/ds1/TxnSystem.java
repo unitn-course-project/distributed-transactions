@@ -41,7 +41,7 @@ public class TxnSystem {
     for (ActorRef coordinator : coordinators)
       coordinator.tell(startMsg, ActorRef.noSender());
 
-    WelcomeMsg welcomeMsg = new WelcomeMsg(N_SERVERS * 10-1, coordinators);
+    WelcomeMsg welcomeMsg = new WelcomeMsg(N_SERVERS * 10 - 1, coordinators);
     for (ActorRef client : clients)
       client.tell(welcomeMsg, ActorRef.noSender());
 
