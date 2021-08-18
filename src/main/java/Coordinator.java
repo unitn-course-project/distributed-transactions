@@ -15,6 +15,10 @@ public class Coordinator extends Server {
     //    private final HashMap<String, Boolean> mapTransaction2Decision;
     private final HashMap<String, Integer> checkSum;
     private final HashMap<String, HashSet<ActorRef>> checkSumResponse;
+    private static final double CRASH_PROBABILITY_1 = 0;
+    private static final double CRASH_PROBABILITY_2 = 0;
+
+    private final int VOTE_REQUEST_TIMEOUT = 1000;
 
     public Coordinator(int id, HashMap<Integer, ActorRef> map) {
         super();
@@ -72,7 +76,7 @@ public class Coordinator extends Server {
             }else{
                 multicastAndCrash(new Message.VoteRequestMsg(mapClient2Transaction.get(getSender())), 3000);
             }
-
+            setTimeout(VOTE_REQUEST_TIMEOUT);
         } else {
             String transactionId = mapClient2Transaction.get(getSender());
             fixDecision(transactionId, false);
@@ -135,6 +139,16 @@ public class Coordinator extends Server {
         }
     }
 
+    private void onTimeout(Message.Timeout msg){
+        for (String transactionId : mapTransaction2Decision.keySet()) {
+            if (mapTransaction2Decision.get(transactionId) == null) {
+                System.out.println(getSelf().toString() + "Timeout " + transactionId + " ABORT");
+                fixDecision(transactionId, false);
+                decideChange(transactionId);
+            }
+        }
+    }
+
     void multicast(Serializable m) {
         for (ActorRef p : mapDataStoreByKey.values()) {
             p.tell(m, getSelf());
@@ -192,6 +206,8 @@ public class Coordinator extends Server {
                 .match(Message.TxnEndMsg.class, this::onTxnEndMsg)
                 .match(Message.VoteResponseMsg.class, this::onVoteResponseMsg)
                 .match(Message.CheckConsistentResponse.class, this::onCheckConsistentResponseMsg)
+                .match(Message.Timeout.class, this::onTimeout)
+                .match(Message.DecisionRequest.class, this::onDecisionRequest)
                 .build();
     }
 }

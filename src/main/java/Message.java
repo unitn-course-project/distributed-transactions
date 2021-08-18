@@ -118,49 +118,72 @@ public class Message {
         }
     }
 
-    public static class VoteRequestMsg implements Serializable{
+    public static class VoteRequestMsg implements Serializable {
         public String transactionId;
-        public VoteRequestMsg(String transactionId){
+
+        public VoteRequestMsg(String transactionId) {
             this.transactionId = transactionId;
         }
     }
 
-    public static class VoteResponseMsg implements Serializable{
+    public static class VoteResponseMsg implements Serializable {
         public final boolean commit;
         public String transactionId;
 
-        public VoteResponseMsg(String transactionId, boolean commit){
+        public VoteResponseMsg(String transactionId, boolean commit) {
             this.transactionId = transactionId;
             this.commit = commit;
         }
     }
 
-    public static class DecisionMsg implements Serializable{
+    public static class DecisionMsg implements Serializable {
         public final boolean commit;
         public String transactionId;
 
-        public DecisionMsg(String transactionId, boolean commit){
+        public DecisionMsg(String transactionId, boolean commit) {
             this.transactionId = transactionId;
             this.commit = commit;
         }
     }
 
-    public static class CheckConsistentRequest implements Serializable{
+    public static class CheckConsistentRequest implements Serializable {
         public String transactionId;
 
-        public CheckConsistentRequest(String transactionId){
+        public CheckConsistentRequest(String transactionId) {
             this.transactionId = transactionId;
         }
     }
 
-    public static class CheckConsistentResponse implements Serializable{
+    public static class CheckConsistentResponse implements Serializable {
         public final int sum;
         public final String transactionId;
-        public CheckConsistentResponse(int sum, String transactionId){
+
+        public CheckConsistentResponse(int sum, String transactionId) {
             this.sum = sum;
             this.transactionId = transactionId;
         }
     }
 
-    public static class Recovery implements Serializable{}
+    public static class Recovery implements Serializable {
+    }
+
+    public static class Timeout implements Serializable {
+    }
+
+    public static class DecisionRequest implements Serializable {
+        public final String transactionId;
+        public DecisionRequest(String transactionId){
+            this.transactionId = transactionId;
+        }
+    }
+
+    public static class InitialSetting implements Serializable{
+        public final List<ActorRef> coordinators;
+        public final List<ActorRef> dataStores;
+
+        public InitialSetting(List<ActorRef> coordinators, List<ActorRef> dataStores){
+            this.coordinators = coordinators;
+            this.dataStores = dataStores;
+        }
+    }
 }

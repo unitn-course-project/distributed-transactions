@@ -7,11 +7,9 @@ import java.util.concurrent.TimeUnit;
 
 public abstract class Server extends AbstractActor {
     protected HashMap<String, Boolean> mapTransaction2Decision;
-    protected static final double CRASH_PROBABILITY_1 = 0.5;
-    protected static final double CRASH_PROBABILITY_2 = 0;
     protected final Random r;
 
-    public Server(){
+    public Server() {
         mapTransaction2Decision = new HashMap<>();
         r = new Random();
     }
@@ -22,9 +20,17 @@ public abstract class Server extends AbstractActor {
         mapTransaction2Decision.putIfAbsent(transactionId, commit);
     }
 
-    void crash(int recoverIn){
+    public void onDecisionRequest(Message.DecisionRequest msg) {
+        String transactionId = msg.transactionId;
+        if (mapTransaction2Decision.get(transactionId) != null) {
+            getSender().tell(new Message.DecisionMsg(transactionId, mapTransaction2Decision.get(transactionId)), getSelf());
+        }
+
+    }
+
+    void crash(int recoverIn) {
         getContext().become(crashed());
-        System.out.println(getSelf().toString()+" CRASH!!!!!!!");
+        System.out.println(getSelf().toString() + " CRASH!!!!!!!");
 
         getContext().system().scheduler().scheduleOnce(
                 Duration.create(recoverIn, TimeUnit.MILLISECONDS),
@@ -34,10 +40,20 @@ public abstract class Server extends AbstractActor {
         );
     }
 
-    public Receive crashed(){
+    void setTimeout(int time) {
+        getContext().system().scheduler().scheduleOnce(
+                Duration.create(time, TimeUnit.MILLISECONDS),
+                getSelf(),
+                new Message.Timeout(),
+                getContext().system().dispatcher(), getSelf()
+        );
+    }
+
+    public Receive crashed() {
         return receiveBuilder()
                 .match(Message.Recovery.class, this::onRecovery)
-                .matchAny(msg -> {})
+                .matchAny(msg -> {
+                })
                 .build();
     }
 

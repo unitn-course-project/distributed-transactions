@@ -15,6 +15,7 @@ public class Main {
 
 //        List<ActorRef> dataStores = new ArrayList<>();
         HashMap<Integer, ActorRef> mapDataStoreByKey = new HashMap<>();
+        List<ActorRef> dataStores = new ArrayList<>();
         for(int i=0; i<N_SERVER; i++){
             HashMap<Integer, DataStore.Value> data = new HashMap<>();
             for(int j=0; j<10; j++){
@@ -22,12 +23,16 @@ public class Main {
             }
             ActorRef dataStore = system.actorOf(DataStore.props(i, data));
             mapDataStoreByKey.put(i, dataStore);
-//            dataStores.add(dataStore);
+            dataStores.add(dataStore);
         }
 
         List<ActorRef> coordinators = new ArrayList<>();
         for (int i = 0; i < N_COORDINATORS; i++) {
             coordinators.add(system.actorOf(Coordinator.props(i, mapDataStoreByKey), "coordinator-" + i));
+        }
+
+        for(ActorRef store : dataStores){
+            store.tell(new Message.InitialSetting(coordinators, dataStores), null);
         }
 
         List<ActorRef> clients = new ArrayList<>();

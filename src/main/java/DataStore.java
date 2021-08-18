@@ -1,10 +1,7 @@
 import akka.actor.ActorRef;
 import akka.actor.Props;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class DataStore extends Server {
     protected int id;
@@ -12,6 +9,10 @@ public class DataStore extends Server {
     protected Map<Integer, Value> transactionWorkspace;
     protected Map<String, HashMap<Integer, Value>> workspace;
     protected boolean[] validationLock;
+    protected List<ActorRef> coordinators;
+    protected List<ActorRef> dataStores;
+    private final int DECISION_TIMEOUT = 1000;
+    private static final double CRASH_PROBABILITY = 0.5;
 
     public static class Value {
         private int version;
@@ -68,18 +69,22 @@ public class DataStore extends Server {
         return Props.create(DataStore.class, () -> new DataStore(id, data));
     }
 
+    private void initialSetting(Message.InitialSetting msg){
+        this.coordinators = msg.coordinators;
+        this.dataStores = msg.dataStores;
+    }
+
     private void onReadMsg(Message.ReadMsg msg) {
         ActorRef coordinator = getSender();
         int value;
-        if(workspace.containsKey(msg.transactionId)){
+        if (workspace.containsKey(msg.transactionId)) {
             HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
-            if(modifiedWorkspace.containsKey(msg.key)) {
+            if (modifiedWorkspace.containsKey(msg.key)) {
                 value = modifiedWorkspace.get(msg.key).getValue();
-            }
-            else {
+            } else {
                 value = data.get(msg.key).getValue();
             }
-        }else{
+        } else {
             Value modifyingValue = data.get(msg.key);
             value = modifyingValue.getValue();
             HashMap<Integer, Value> modifyingWorkspace = new HashMap<>();
@@ -113,6 +118,7 @@ public class DataStore extends Server {
 
     private void onVoteRequestMsg(Message.VoteRequestMsg msg) {
         ActorRef coordinator = getSender();
+        mapTransaction2Decision.put(msg.transactionId, null);
 
         if (!workspace.containsKey(msg.transactionId)) {
 //            System.out.println("DataStore-"+this.id+" does not contain "+msg.transactionId);
@@ -122,6 +128,7 @@ public class DataStore extends Server {
             for (Integer key : modifiedWorkspace.keySet()) {
                 if (validationLock[key % 10]) {
 //                    System.out.println("DataStore-"+this.id+" "+msg.transactionId+" modify when validating");
+                    fixDecision(msg.transactionId, false);
                     coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, false), getSelf());
                     return;
                 }
@@ -136,22 +143,31 @@ public class DataStore extends Server {
                 }
             }
 //            System.out.println("DataStore-"+this.id+" "+msg.transactionId+" canCommit="+canCommit);
+            if(!canCommit)
+                fixDecision(msg.transactionId, false);
             coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, canCommit), getSelf());
+            setTimeout(DECISION_TIMEOUT);
+            if(r.nextDouble() < CRASH_PROBABILITY){
+                crash(3000);
+            }
         }
     }
 
     private void onDecisionMsg(Message.DecisionMsg msg) {
-        System.out.println("onDecisionMsg::"+msg.transactionId);
+        System.out.println("onDecisionMsg::" + msg.transactionId);
         if (workspace.containsKey(msg.transactionId)) {
             HashMap<Integer, Value> modifiedWorkspace = workspace.get(msg.transactionId);
             if (msg.commit) {
-                System.out.println("onDecisionMsg::"+msg.transactionId+" apply change");
+                System.out.println("onDecisionMsg::" + msg.transactionId + " apply change");
                 for (Map.Entry<Integer, Value> element : modifiedWorkspace.entrySet()) {
                     Value updatingValue = data.get(element.getKey());
                     updatingValue.setValue(element.getValue().getValue());
                     updatingValue.setVersion(updatingValue.getVersion() + 1);
                 }
-            }
+                fixDecision(msg.transactionId, true);
+            }else
+                fixDecision(msg.transactionId, false);
+
             workspace.remove(msg.transactionId);
 
             for (Integer key : modifiedWorkspace.keySet()) {
@@ -162,13 +178,13 @@ public class DataStore extends Server {
         printData(msg.transactionId);
     }
 
-    private void onCheckConsistentMsg(Message.CheckConsistentRequest msg){
+    private void onCheckConsistentMsg(Message.CheckConsistentRequest msg) {
         int sum = sumToCheck();
         ActorRef coordinator = getSender();
         coordinator.tell(new Message.CheckConsistentResponse(sum, msg.transactionId), getSelf());
     }
 
-    private void printData(String transactionId){
+    private void printData(String transactionId) {
         StringBuilder printResult = new StringBuilder("========= DataStore-" + this.id + " with " + transactionId + " =========\n");
         for (Map.Entry<Integer, Value> element : data.entrySet()) {
             printResult.append(element.getKey()).append(": ").append(element.getValue().toString()).append("\n");
@@ -189,7 +205,7 @@ public class DataStore extends Server {
 //        System.out.println(printResult);
 //    }
 
-    private int sumToCheck(){
+    private int sumToCheck() {
         Iterator<Map.Entry<Integer, Value>> it = data.entrySet().iterator();
         int sum = 0;
         while (it.hasNext()) {
@@ -199,9 +215,33 @@ public class DataStore extends Server {
         return sum;
     }
 
+    private void onTimeout(Message.Timeout msg){
+        for (String transactionId : mapTransaction2Decision.keySet()) {
+            if (mapTransaction2Decision.get(transactionId) == null) {
+                System.out.println(getSelf().toString() + "Timeout " + transactionId + " Asking around");
+                for (ActorRef p : dataStores)
+                    if(p != getSelf())
+                        p.tell(new Message.DecisionRequest(transactionId), getSelf());
+
+                for (ActorRef p : coordinators)
+                    p.tell(new Message.DecisionRequest(transactionId), getSelf());
+                setTimeout(DECISION_TIMEOUT);
+            }
+        }
+    }
+
     @Override
     protected void onRecovery(Message.Recovery msg) {
-
+        getContext().become(createReceive());
+        for (String transactionId : mapTransaction2Decision.keySet()) {
+            if (mapTransaction2Decision.get(transactionId) == null) {
+                System.out.println(getSelf() + " Recovery asking coordinator for transaction " + transactionId);
+                for (ActorRef p : coordinators) {
+                    p.tell(new Message.DecisionRequest(transactionId), getSelf());
+                    setTimeout(DECISION_TIMEOUT);
+                }
+            }
+        }
     }
 
     @Override
@@ -212,6 +252,9 @@ public class DataStore extends Server {
                 .match(Message.VoteRequestMsg.class, this::onVoteRequestMsg)
                 .match(Message.DecisionMsg.class, this::onDecisionMsg)
                 .match(Message.CheckConsistentRequest.class, this::onCheckConsistentMsg)
+                .match(Message.InitialSetting.class, this::initialSetting)
+                .match(Message.Timeout.class, this::onTimeout)
+                .match(Message.DecisionRequest.class, this::onDecisionRequest)
                 .build();
     }
 }
