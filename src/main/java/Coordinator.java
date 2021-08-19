@@ -6,17 +6,16 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.UUID;
 
-public class Coordinator extends Server {
+public class Coordinator extends Node {
     protected int id;
     protected HashMap<Integer, ActorRef> mapDataStoreByKey;
     private final HashMap<String, ActorRef> mapTransaction2Client;
     private final HashMap<ActorRef, String> mapClient2Transaction;
     private final HashMap<String, HashSet<ActorRef>> yesVoters;
-    //    private final HashMap<String, Boolean> mapTransaction2Decision;
     private final HashMap<String, Integer> checkSum;
     private final HashMap<String, HashSet<ActorRef>> checkSumResponse;
-    private static final double CRASH_PROBABILITY_1 = 0;
-    private static final double CRASH_PROBABILITY_2 = 0;
+    private static final double CRASH_PROBABILITY_1 = 0.5;
+    private static final double CRASH_PROBABILITY_2 = 0.5;
 
     private final int VOTE_REQUEST_TIMEOUT = 1000;
 
@@ -26,7 +25,6 @@ public class Coordinator extends Server {
         this.mapDataStoreByKey = map;
         mapTransaction2Client = new HashMap<>();
         mapClient2Transaction = new HashMap<>();
-//        mapTransaction2Decision = new HashMap<>();
         yesVoters = new HashMap<>();
         checkSum = new HashMap<>();
         checkSumResponse = new HashMap<>();
@@ -36,35 +34,44 @@ public class Coordinator extends Server {
         return Props.create(Coordinator.class, () -> new Coordinator(id, map));
     }
 
+    /*
+     * At beginning of each transaction
+     * Create transactionId and keep map between transactionID and client
+     */
     private void onTxnBeginMsg(Message.TxnBeginMsg msg) {
         ActorRef client = getSender();
         String transactionId = UUID.randomUUID().toString();
         mapTransaction2Client.put(transactionId, client);
         mapClient2Transaction.put(client, transactionId);
         client.tell(new Message.TxnAcceptMsg(), getSelf());
-//        System.out.println("Coordinator-" + this.id + " ACCEPT txn begin from " + client + " with transactionId=" + transactionId);
     }
 
+    /*
+     * Receiving the read message from client
+     * Attach client transactionID and forward message to the data-store base on key
+     */
     private void onReadMsg(Message.ReadMsg msg) {
         int dataStoreId = msg.key / 10;
         ActorRef dataStore = mapDataStoreByKey.get(dataStoreId);
         msg.transactionId = mapClient2Transaction.get(getSender());
         dataStore.tell(msg, getSelf());
-//        System.out.println("Coordinator " + this.id + " forward Read(clientId="+msg.clientId+", key="+msg.key+") to "+dataStoreId);
     }
 
     private void onReadResultMsg(Message.ReadResultMsg msg) {
         ActorRef client = mapTransaction2Client.get(msg.transactionId);
         client.tell(msg, getSelf());
-//        System.out.println("Coordinator " + this.id + " forward "+msg.toString());
     }
 
-
+    /*
+     * Receiving the writing message from client
+     * Attach client transactionID and forward message to the data-store base on key
+     */
     private void onWriteMsg(Message.WriteMsg msg) {
         ActorRef dataStore = mapDataStoreByKey.get(msg.key / 10);
         msg.transactionID = mapClient2Transaction.get(getSender());
         dataStore.tell(msg, getSelf());
     }
+
 
     private void onTxnEndMsg(Message.TxnEndMsg msg) {
         mapTransaction2Decision.put(mapClient2Transaction.get(getSender()), null);
@@ -76,8 +83,10 @@ public class Coordinator extends Server {
             }else{
                 multicastAndCrash(new Message.VoteRequestMsg(mapClient2Transaction.get(getSender())), 3000);
             }
-            setTimeout(VOTE_REQUEST_TIMEOUT);
-        } else {
+            setTimeout(VOTE_REQUEST_TIMEOUT, mapClient2Transaction.get(getSender()));
+        }
+        //If abort message, the coordinator will multicast the abort decision to all data-store
+        else {
             String transactionId = mapClient2Transaction.get(getSender());
             fixDecision(transactionId, false);
             multicast(new Message.DecisionMsg(transactionId, mapTransaction2Decision.get(transactionId)));
@@ -89,8 +98,6 @@ public class Coordinator extends Server {
     private void onVoteResponseMsg(Message.VoteResponseMsg msg) {
         //Check if already send decision to client and server
         if (mapTransaction2Client.containsKey(msg.transactionId)) {
-//            if (mapTransaction2Decision.get(msg.transactionId) != null)
-//                return;
             if (msg.commit) {
                 HashSet<ActorRef> tranYesVoters = yesVoters.get(msg.transactionId);
                 tranYesVoters.add(getSender());
@@ -104,7 +111,8 @@ public class Coordinator extends Server {
                     }
                     System.out.println(msg.transactionId + " allVoteYes -> tellDecision2Client from " + getSelf().toString() + " ------>>>>>>>>");
                 }
-            } else {
+            }
+            else {
                 fixDecision(msg.transactionId, false);
                 if(r.nextDouble() > CRASH_PROBABILITY_2) {
                     decideChange(msg.transactionId);
@@ -140,13 +148,12 @@ public class Coordinator extends Server {
     }
 
     private void onTimeout(Message.Timeout msg){
-        for (String transactionId : mapTransaction2Decision.keySet()) {
-            if (mapTransaction2Decision.get(transactionId) == null) {
-                System.out.println(getSelf().toString() + "Timeout " + transactionId + " ABORT");
-                fixDecision(transactionId, false);
-                decideChange(transactionId);
-            }
+        if (mapTransaction2Decision.containsKey(msg.transactionId) && mapTransaction2Decision.get(msg.transactionId) == null) {
+            System.out.println(getSelf().toString() + "Timeout " + msg.transactionId + " ABORT");
+            fixDecision(msg.transactionId, false);
+            decideChange(msg.transactionId);
         }
+
     }
 
     void multicast(Serializable m) {

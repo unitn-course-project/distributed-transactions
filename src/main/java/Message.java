@@ -168,6 +168,10 @@ public class Message {
     }
 
     public static class Timeout implements Serializable {
+        public final String transactionId;
+        public Timeout(String transactionId){
+            this.transactionId = transactionId;
+        }
     }
 
     public static class DecisionRequest implements Serializable {
