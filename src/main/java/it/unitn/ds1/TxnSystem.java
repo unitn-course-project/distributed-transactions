@@ -13,8 +13,11 @@ import it.unitn.ds1.TxnServer.SumTestRequest;
 public class TxnSystem {
   final static int N_SERVERS = 10;
   final static int N_CORDINATORS = 10;
-  final static int N_CLIENTS = 10;
+  //final static int N_CLIENTS = 10;
+  final static int N_CLIENTS = 1;
   public final static String LOG_SUM_FILENAME = "sum.txt";
+  public final static int DECISION_TIMEOUT= 2000;
+  public final static int VOTE_TIMEOUT= 1000;
 
   public static void main(String[] args) {
     // Create the actor system

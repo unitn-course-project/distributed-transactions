@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
-import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
@@ -24,13 +24,13 @@ import it.unitn.ds1.TxnClient.TxnResultMsg;
 import it.unitn.ds1.TxnClient.WriteMsg;
 import it.unitn.ds1.model.PrivateWorkspace;
 import it.unitn.ds1.model.RowValue;
+import scala.concurrent.duration.Duration;
 
 /**
  * Coordinators manage transaction request and manipulate it among servers
  */
-public class TxnCoordinator extends AbstractActor {
+public class TxnCoordinator extends Node {
   LoggingAdapter log = Logging.getLogger(getContext().getSystem(), this);
-  private int id;
   private List<ActorRef> servers;
 
   // state varibale
@@ -45,7 +45,7 @@ public class TxnCoordinator extends AbstractActor {
   private Map<String, Decision> historyTransaction;
 
   public TxnCoordinator(int id) {
-    this.id = id;
+    super(id);
   }
 
   static public Props props(int id) {
@@ -97,7 +97,24 @@ public class TxnCoordinator extends AbstractActor {
 
   }
 
+  public static class Timeout implements Serializable {
+    public final String transactionId;
+    public final int serverId;
+
+    public Timeout(String transactionId, int serverId) {
+      this.transactionId = transactionId;
+      this.serverId = serverId;
+    }
+
+  }
+
   public static class DecisionRequest implements Serializable {
+    public final String transactionId;
+
+    public DecisionRequest(String transactionId) {
+      this.transactionId = transactionId;
+    }
+
   }
 
   public static class DecisionResponse implements Serializable {
@@ -109,12 +126,6 @@ public class TxnCoordinator extends AbstractActor {
       this.transactionId = transactionId;
     }
 
-  }
-
-  public static class Timeout implements Serializable {
-  }
-
-  public static class Recovery implements Serializable {
   }
 
   public static class StartMsg implements Serializable {
@@ -202,11 +213,22 @@ public class TxnCoordinator extends AbstractActor {
       if (vReponse.vote == Vote.YES) {
         Set<Integer> requireVote = requiredServerVote.get(vReponse.transactionId);
         requireVote.remove(vReponse.clientId);
+        requiredServerVote.put(vReponse.transactionId, requireVote);
+        log.info(requireVote.toString());
         if (requireVote.size() <= 0)
           commitTransaction(vReponse.transactionId);
       } else
         abortTransaction(vReponse.transactionId);
     }
+  }
+
+  private void onDecisionRequest(DecisionRequest decisionRequest) {
+    if (historyTransaction.containsKey(decisionRequest.transactionId))
+      getSender().tell(
+          new DecisionResponse(historyTransaction.get(decisionRequest.transactionId), decisionRequest.transactionId),
+          getSelf());
+    else
+      log.error("EROOR anonymous transaction or not decide yet");
   }
 
   private void onEndTxnMsg(TxnEndMsg endMsg) {
@@ -231,8 +253,19 @@ public class TxnCoordinator extends AbstractActor {
     client.tell(new ReadResultMsg(readDataResultMsg.key, readDataResultMsg.value), getSelf());
   }
 
-  private void updatePhase() {
+  private void onTimeout(Timeout timeout) {
+    if (!historyTransaction.containsKey(timeout.transactionId))
+      if (requiredServerVote.get(timeout.transactionId).contains(timeout.serverId)) {
+        abortTransaction(timeout.transactionId);
+      }
+  }
 
+  @Override
+  protected void onRecovery(Recovery msg) {
+    getContext().become(createReceive());
+    for (String transactionId : mapCurrentTransaction.keySet()) {
+      abortTransaction(transactionId);
+    }
   }
 
   private void validationPhase(String transactionId) {
@@ -255,8 +288,10 @@ public class TxnCoordinator extends AbstractActor {
 
     for (Integer server : requiredVote) {
       servers.get(server).tell(new VoteRequest(transactionId, changesByServer.get(server)), getSelf());
+      setTimeout(transactionId, server, TxnSystem.VOTE_TIMEOUT);
     }
     requiredServerVote.put(transactionId, requiredVote);
+    // crash(5000);
   }
 
   /**
@@ -347,11 +382,16 @@ public class TxnCoordinator extends AbstractActor {
 
   @Override
   public Receive createReceive() {
-    // TODO Auto-generated method stub
     return receiveBuilder().match(StartMsg.class, this::onStartMsg).match(TxnBeginMsg.class, this::onBeginTxnMsg)
         .match(ReadMsg.class, this::onReadMsg).match(ReadDataResultMsg.class, this::onReadResultMsg)
         .match(WriteMsg.class, this::onWriteMsg).match(TxnEndMsg.class, this::onEndTxnMsg)
-        .match(VoteReponse.class, this::onVoteResponse).build();
+        .match(VoteReponse.class, this::onVoteResponse).match(DecisionRequest.class, this::onDecisionRequest)
+        .match(Timeout.class, this::onTimeout).match(Recovery.class, this::onRecovery).build(); // why have recovery
+                                                                                                // here ?
   }
 
+  void setTimeout(String transactionId, Integer serverId, int time) {
+    getContext().system().scheduler().scheduleOnce(Duration.create(time, TimeUnit.MILLISECONDS), getSelf(),
+        new Timeout(transactionId, serverId), getContext().system().dispatcher(), getSelf());
+  }
 }

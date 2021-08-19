@@ -6,12 +6,14 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
-import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import it.unitn.ds1.TxnCoordinator.Decision;
+import it.unitn.ds1.TxnCoordinator.DecisionRequest;
 import it.unitn.ds1.TxnCoordinator.DecisionResponse;
 import it.unitn.ds1.TxnCoordinator.ReadDataMsg;
 import it.unitn.ds1.TxnCoordinator.ReadDataResultMsg;
@@ -19,19 +21,20 @@ import it.unitn.ds1.TxnCoordinator.Vote;
 import it.unitn.ds1.TxnCoordinator.VoteReponse;
 import it.unitn.ds1.TxnCoordinator.VoteRequest;
 import it.unitn.ds1.model.RowValue;
+import scala.concurrent.duration.Duration;
 
-public class TxnServer extends AbstractActor {
+public class TxnServer extends Node {
   LoggingAdapter log = Logging.getLogger(getContext().getSystem(), this);
 
-  private int id;
   private Map<Integer, RowValue> data;
 
   // operated variables
   private Map<Integer, String> validationLocks;
   private Map<String, Map<Integer, Integer>> transactionChange;
+  private Map<String, ActorRef> mapTransactionCoordinator;
 
   public TxnServer(int id) {
-    this.id = id;
+    super(id);
   }
 
   static public Props props(int id) {
@@ -46,6 +49,7 @@ public class TxnServer extends AbstractActor {
     }
     validationLocks = new HashMap<>();
     transactionChange = new HashMap<>();
+    mapTransactionCoordinator = new HashMap<>();
   }
   /*-- Message classes ------------------------------------------------------ */
 
@@ -58,12 +62,28 @@ public class TxnServer extends AbstractActor {
 
   }
 
+  public static class Timeout implements Serializable {
+    public final String transactionId;
+
+    public Timeout(String transactionId) {
+      this.transactionId = transactionId;
+    }
+
+  }
+
   /*-- Message handlers ----------------------------------------------------- */
   private void onReadMsg(ReadDataMsg readMsg) {
     RowValue readValue = data.get(readMsg.key);
     getSender().tell(
         new ReadDataResultMsg(readMsg.transactionId, readMsg.key, readValue.getValue(), readValue.getVersion()),
         getSelf());
+  }
+
+  private void onTimeout(Timeout timeout) {
+    if (transactionChange.containsKey(timeout.transactionId)) {
+      mapTransactionCoordinator.get(timeout.transactionId).tell(new DecisionRequest(timeout.transactionId), getSelf());
+      setTimeout(timeout.transactionId, TxnSystem.DECISION_TIMEOUT);
+    }
   }
 
   private void onSumTestRequest(SumTestRequest sumTestRequest) {
@@ -74,10 +94,11 @@ public class TxnServer extends AbstractActor {
     log.info("Sum test server :" + id + " test id is " + sumTestRequest.testId + " sum =" + sum);
     BufferedWriter writer;
     try {
-      writer = new BufferedWriter(new FileWriter(TxnSystem.LOG_SUM_FILENAME,true));
-      //writer.write("Sum test server :" + id + " test id is " + sumTestRequest.testId + " sum =" + sum+"\n");
-      //writer.write(sumTestRequest.testId + ", " + sum+"\n");
-      writer.write( sum+"\n");
+      writer = new BufferedWriter(new FileWriter(TxnSystem.LOG_SUM_FILENAME, true));
+      // writer.write("Sum test server :" + id + " test id is " +
+      // sumTestRequest.testId + " sum =" + sum+"\n");
+      // writer.write(sumTestRequest.testId + ", " + sum+"\n");
+      writer.write(sum + "\n");
 
       writer.close();
     } catch (IOException e) {
@@ -87,6 +108,10 @@ public class TxnServer extends AbstractActor {
   }
 
   private void onVoteRequest(VoteRequest vRequest) {
+    // if (this.id==0) {
+    // crash(5000);
+    // return;
+    // }
     Map<Integer, RowValue> changeData = vRequest.changes;
     Map<Integer, Integer> changes = new HashMap<>();
     for (Integer key : changeData.keySet())
@@ -99,6 +124,7 @@ public class TxnServer extends AbstractActor {
       changes.put(key, changeData.get(key).getValue());
     }
     transactionChange.put(vRequest.transactionId, changes);
+    mapTransactionCoordinator.put(vRequest.transactionId, getSender());
     getSender().tell(new VoteReponse(Vote.YES, id, vRequest.transactionId), getSelf());
   }
 
@@ -124,7 +150,21 @@ public class TxnServer extends AbstractActor {
     // TODO Auto-generated method stub
     return receiveBuilder().match(ReadDataMsg.class, this::onReadMsg).match(VoteRequest.class, this::onVoteRequest)
         .match(DecisionResponse.class, this::onDecisionResponse).match(SumTestRequest.class, this::onSumTestRequest)
-        .build();
+        .match(Timeout.class, this::onTimeout).build();
   }
 
+  @Override
+  protected void onRecovery(Recovery msg) {
+    getContext().become(createReceive());
+    for (String transactionId : transactionChange.keySet()) {
+      print("Recovery. Asking the coordinator.");
+      mapTransactionCoordinator.get(transactionId).tell(new DecisionRequest(transactionId), getSelf());
+      setTimeout(transactionId, TxnSystem.DECISION_TIMEOUT);
+    }
+  }
+
+  void setTimeout(String transactionId, int time) {
+    getContext().system().scheduler().scheduleOnce(Duration.create(time, TimeUnit.MILLISECONDS), getSelf(),
+        new Timeout(transactionId), getContext().system().dispatcher(), getSelf());
+  }
 }
