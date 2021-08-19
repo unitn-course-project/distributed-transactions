@@ -8,11 +8,13 @@ import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import it.unitn.ds1.TxnClient.WelcomeMsg;
 import it.unitn.ds1.TxnCoordinator.StartMsg;
+import it.unitn.ds1.TxnServer.SumTestRequest;
 
 public class TxnSystem {
   final static int N_SERVERS = 10;
   final static int N_CORDINATORS = 10;
   final static int N_CLIENTS = 10;
+  public final static String LOG_SUM_FILENAME = "sum.txt";
 
   public static void main(String[] args) {
     // Create the actor system
@@ -44,12 +46,24 @@ public class TxnSystem {
     WelcomeMsg welcomeMsg = new WelcomeMsg(N_SERVERS * 10 - 1, coordinators);
     for (ActorRef client : clients)
       client.tell(welcomeMsg, ActorRef.noSender());
-
+    int numberOfTest = 0;
     try {
-      System.out.println(">>> Press ENTER to exit <<<");
-      System.in.read();
+      do {
+        System.out.println(">>> Press 1 to make a sum test and ENTER to exit <<<");
+        int inChar = System.in.read();
+        if (inChar == '1') {
+          for (ActorRef server : servers) {
+            server.tell(new SumTestRequest(numberOfTest), ActorRef.noSender());
+          }
+          numberOfTest++;
+        } else
+          break;
+      } while (true);
+
     } catch (IOException ioe) {
     }
+    for (ActorRef server : servers)
+      server.tell(new SumTestRequest(numberOfTest), ActorRef.noSender());
     system.terminate();
   }
 }

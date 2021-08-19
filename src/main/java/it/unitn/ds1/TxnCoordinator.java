@@ -4,8 +4,10 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import akka.actor.AbstractActor;
@@ -38,6 +40,9 @@ public class TxnCoordinator extends AbstractActor {
   private Map<String, ActorRef> mapCurrentTransactionActor;
   private Map<String, PrivateWorkspace> processingPrivateWorkspace;
 
+  private Map<String, Set<Integer>> requiredServerVote;
+  // history
+  private Map<String, Decision> historyTransaction;
 
   public TxnCoordinator(int id) {
     this.id = id;
@@ -54,9 +59,64 @@ public class TxnCoordinator extends AbstractActor {
     currentTransaction = new HashMap<>();
     processingPrivateWorkspace = new HashMap<>();
     mapCurrentTransactionActor = new HashMap<>();
+    requiredServerVote = new HashMap<>();
+    historyTransaction = new HashMap<>();
   }
 
   /*-- Message classes ------------------------------------------------------ */
+
+  public enum Vote {
+    NO, YES
+  }
+
+  public enum Decision {
+    ABORT, COMMIT
+  }
+
+  public static class VoteRequest implements Serializable {
+    public final String transactionId;
+    public final Map<Integer, RowValue> changes;
+
+    public VoteRequest(String transactionId, Map<Integer, RowValue> changes) {
+      this.transactionId = transactionId;
+      this.changes = changes;
+    }
+
+  }
+
+  public static class VoteReponse implements Serializable {
+    public final Vote vote;
+    public final Integer clientId;
+    public final String transactionId;
+
+    public VoteReponse(Vote vote, Integer clientId, String transactionId) {
+      this.vote = vote;
+      this.clientId = clientId;
+      this.transactionId = transactionId;
+    }
+
+  }
+
+  public static class DecisionRequest implements Serializable {
+  }
+
+  public static class DecisionResponse implements Serializable {
+    public final Decision decision;
+    public final String transactionId;
+
+    public DecisionResponse(Decision decision, String transactionId) {
+      this.decision = decision;
+      this.transactionId = transactionId;
+    }
+
+  }
+
+  public static class Timeout implements Serializable {
+  }
+
+  public static class Recovery implements Serializable {
+  }
+
   public static class StartMsg implements Serializable {
     public final List<ActorRef> servers;
 
@@ -137,18 +197,20 @@ public class TxnCoordinator extends AbstractActor {
 
   }
 
-  private void onEndTxnMsg(TxnEndMsg endMsg) {
-    if (validationPhase())
-      getSender().tell(new TxnResultMsg(true), getSelf());
-    else
-      getSender().tell(new TxnResultMsg(false), getSelf());
-
-    PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(currentTransaction.get(endMsg.clientId));
-    Map<Integer, RowValue> data = privateWorkspace.getData();
-    for (int key : data.keySet()) {
-      getServerByKey(key).tell(new WriteMsg(endMsg.clientId, key, data.get(key).getValue()), getSelf());
+  private void onVoteResponse(VoteReponse vReponse) {
+    if (!historyTransaction.containsKey(vReponse.transactionId)) {
+      if (vReponse.vote == Vote.YES) {
+        Set<Integer> requireVote = requiredServerVote.get(vReponse.transactionId);
+        requireVote.remove(vReponse.clientId);
+        if (requireVote.size() <= 0)
+          commitTransaction(vReponse.transactionId);
+      } else
+        abortTransaction(vReponse.transactionId);
     }
-    clearPrivateWorkspace(currentTransaction.get(endMsg.clientId));
+  }
+
+  private void onEndTxnMsg(TxnEndMsg endMsg) {
+    validationPhase(currentTransaction.get(endMsg.clientId));
   }
 
   /**
@@ -173,8 +235,28 @@ public class TxnCoordinator extends AbstractActor {
 
   }
 
-  private boolean validationPhase() {
-    return true;
+  private void validationPhase(String transactionId) {
+
+    PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(transactionId);
+    Map<Integer, RowValue> data = privateWorkspace.getData();
+    Set<Integer> requiredVote = new HashSet<>();
+    Map<Integer, Map<Integer, RowValue>> changesByServer = new HashMap<>();
+
+    for (int key : data.keySet()) {
+      Map<Integer, RowValue> dataChanges = null;
+      if (changesByServer.containsKey(getServerIdByKey(key)))
+        dataChanges = changesByServer.get(getServerIdByKey(key));
+      else
+        dataChanges = new HashMap();
+      dataChanges.put(key, new RowValue(data.get(key).getVersion(), data.get(key).getValue()));
+      changesByServer.put(getServerIdByKey(key), dataChanges);
+      requiredVote.add(getServerIdByKey(key));
+    }
+
+    for (Integer server : requiredVote) {
+      servers.get(server).tell(new VoteRequest(transactionId, changesByServer.get(server)), getSelf());
+    }
+    requiredServerVote.put(transactionId, requiredVote);
   }
 
   /**
@@ -220,10 +302,47 @@ public class TxnCoordinator extends AbstractActor {
     mapCurrentTransaction.remove(transactionId);
     processingPrivateWorkspace.remove(transactionId);
     processingClientIds.remove(processingClientIds.indexOf(clientId));
+    requiredServerVote.remove(transactionId);
+    mapCurrentTransactionActor.remove(transactionId);
+  }
+
+  private void commitTransaction(String transactionId) {
+    historyTransaction.put(transactionId, Decision.COMMIT);
+    mapCurrentTransactionActor.get(transactionId).tell(new TxnResultMsg(true), getSelf());
+    Set<ActorRef> informingServer = new HashSet<>();
+    PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(transactionId);
+    Map<Integer, RowValue> data = privateWorkspace.getData();
+    for (int key : data.keySet()) {
+      informingServer.add(getServerByKey(key));
+    }
+    for (ActorRef actor : informingServer)
+      actor.tell(new DecisionResponse(Decision.COMMIT, transactionId), getSelf());
+    clearPrivateWorkspace(transactionId);
+
+  }
+
+  private void abortTransaction(String transactionId) {
+
+    historyTransaction.put(transactionId, Decision.ABORT);
+    mapCurrentTransactionActor.get(transactionId).tell(new TxnResultMsg(false), getSelf());
+    Set<ActorRef> informingServer = new HashSet<>();
+    PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(transactionId);
+    Map<Integer, RowValue> data = privateWorkspace.getData();
+    for (int key : data.keySet()) {
+      informingServer.add(getServerByKey(key));
+    }
+    for (ActorRef actor : informingServer)
+      actor.tell(new DecisionResponse(Decision.ABORT, transactionId), getSelf());
+    clearPrivateWorkspace(transactionId);
+
   }
 
   private ActorRef getServerByKey(Integer key) {
     return servers.get(key / 10);
+  }
+
+  private Integer getServerIdByKey(Integer key) {
+    return key / 10;
   }
 
   @Override
@@ -231,7 +350,8 @@ public class TxnCoordinator extends AbstractActor {
     // TODO Auto-generated method stub
     return receiveBuilder().match(StartMsg.class, this::onStartMsg).match(TxnBeginMsg.class, this::onBeginTxnMsg)
         .match(ReadMsg.class, this::onReadMsg).match(ReadDataResultMsg.class, this::onReadResultMsg)
-        .match(WriteMsg.class, this::onWriteMsg).match(TxnEndMsg.class, this::onEndTxnMsg).build();
+        .match(WriteMsg.class, this::onWriteMsg).match(TxnEndMsg.class, this::onEndTxnMsg)
+        .match(VoteReponse.class, this::onVoteResponse).build();
   }
 
 }
