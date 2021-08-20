@@ -183,11 +183,11 @@ public class Message {
 
     public static class InitialSetting implements Serializable{
         public final List<ActorRef> coordinators;
-        public final List<ActorRef> dataStores;
+        public final List<ActorRef> servers;
 
-        public InitialSetting(List<ActorRef> coordinators, List<ActorRef> dataStores){
+        public InitialSetting(List<ActorRef> coordinators, List<ActorRef> servers){
             this.coordinators = coordinators;
-            this.dataStores = dataStores;
+            this.servers = servers;
         }
     }
 }

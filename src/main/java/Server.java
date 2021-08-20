@@ -9,7 +9,7 @@ public class Server extends Node {
     protected Map<String, HashMap<Integer, Value>> workspace;
     protected boolean[] validationLock;
     protected List<ActorRef> coordinators;
-    protected List<ActorRef> dataStores;
+    protected List<ActorRef> servers;
     private final int DECISION_TIMEOUT = 1000;
     private static final double CRASH_PROBABILITY = 0.5;
 
@@ -69,7 +69,7 @@ public class Server extends Node {
 
     private void initialSetting(Message.InitialSetting msg){
         this.coordinators = msg.coordinators;
-        this.dataStores = msg.dataStores;
+        this.servers = msg.servers;
     }
 
     /*
@@ -128,7 +128,7 @@ public class Server extends Node {
         ActorRef coordinator = getSender();
         mapTransaction2Decision.put(msg.transactionId, null);
 
-        // If does not contain any modification of sending transactionId, this data-store can commit
+        // If does not contain any modification of sending transactionId, this server can commit
         if (!workspace.containsKey(msg.transactionId)) {
             coordinator.tell(new Message.VoteResponseMsg(msg.transactionId, true), getSelf());
         }
@@ -196,25 +196,13 @@ public class Server extends Node {
     }
 
     private void printData(String transactionId) {
-        StringBuilder printResult = new StringBuilder("========= DataStore-" + this.id + " with " + transactionId + " =========\n");
+        StringBuilder printResult = new StringBuilder("========= Server-" + this.id + " with " + transactionId + " =========\n");
         for (Map.Entry<Integer, Value> element : data.entrySet()) {
             printResult.append(element.getKey()).append(": ").append(element.getValue().toString()).append("\n");
         }
         printResult.append("======>>>>>> sum = ").append(sumToCheck());
         System.out.println(printResult);
     }
-
-//    private void printWorkspace() {
-//        String printResult = "";
-//        for (Map.Entry<String, HashMap<Integer, Value>> stringHashMapEntry : workspace.entrySet()) {
-//            printResult += (stringHashMapEntry.getKey() + ":\n");
-//            HashMap<Integer, Value> tWorkspace = stringHashMapEntry.getValue();
-//            for (Map.Entry<Integer, Value> integerValueEntry : tWorkspace.entrySet()) {
-//                printResult += ("\t" + integerValueEntry.getKey() + ": " + integerValueEntry.getValue().toString() + "\n");
-//            }
-//        }
-//        System.out.println(printResult);
-//    }
 
     private int sumToCheck() {
         Iterator<Map.Entry<Integer, Value>> it = data.entrySet().iterator();
@@ -229,7 +217,7 @@ public class Server extends Node {
     private void onTimeout(Message.Timeout msg){
         if (mapTransaction2Decision.get(msg.transactionId) == null) {
             System.out.println(getSelf().toString() + "Timeout " + msg.transactionId + " Asking around");
-            for (ActorRef p : dataStores)
+            for (ActorRef p : servers)
                 if(p != getSelf())
                     p.tell(new Message.DecisionRequest(msg.transactionId), getSelf());
 

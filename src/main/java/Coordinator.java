@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public class Coordinator extends Node {
     protected int id;
-    protected HashMap<Integer, ActorRef> mapDataStoreByKey;
+    protected HashMap<Integer, ActorRef> mapServerByKey;
     private final HashMap<String, ActorRef> mapTransaction2Client;
     private final HashMap<ActorRef, String> mapClient2Transaction;
     private final HashMap<String, HashSet<ActorRef>> yesVoters;
@@ -22,7 +22,7 @@ public class Coordinator extends Node {
     public Coordinator(int id, HashMap<Integer, ActorRef> map) {
         super();
         this.id = id;
-        this.mapDataStoreByKey = map;
+        this.mapServerByKey = map;
         mapTransaction2Client = new HashMap<>();
         mapClient2Transaction = new HashMap<>();
         yesVoters = new HashMap<>();
@@ -48,13 +48,13 @@ public class Coordinator extends Node {
 
     /*
      * Receiving the read message from client
-     * Attach client transactionID and forward message to the data-store base on key
+     * Attach client transactionID and forward message to the server base on key
      */
     private void onReadMsg(Message.ReadMsg msg) {
-        int dataStoreId = msg.key / 10;
-        ActorRef dataStore = mapDataStoreByKey.get(dataStoreId);
+        int serverId = msg.key / 10;
+        ActorRef server = mapServerByKey.get(serverId);
         msg.transactionId = mapClient2Transaction.get(getSender());
-        dataStore.tell(msg, getSelf());
+        server.tell(msg, getSelf());
     }
 
     private void onReadResultMsg(Message.ReadResultMsg msg) {
@@ -64,12 +64,12 @@ public class Coordinator extends Node {
 
     /*
      * Receiving the writing message from client
-     * Attach client transactionID and forward message to the data-store base on key
+     * Attach client transactionID and forward message to the server base on key
      */
     private void onWriteMsg(Message.WriteMsg msg) {
-        ActorRef dataStore = mapDataStoreByKey.get(msg.key / 10);
+        ActorRef server = mapServerByKey.get(msg.key / 10);
         msg.transactionID = mapClient2Transaction.get(getSender());
-        dataStore.tell(msg, getSelf());
+        server.tell(msg, getSelf());
     }
 
 
@@ -85,7 +85,7 @@ public class Coordinator extends Node {
             }
             setTimeout(VOTE_REQUEST_TIMEOUT, mapClient2Transaction.get(getSender()));
         }
-        //If abort message, the coordinator will multicast the abort decision to all data-store
+        //If abort message, the coordinator will multicast the abort decision to all server
         else {
             String transactionId = mapClient2Transaction.get(getSender());
             fixDecision(transactionId, false);
@@ -142,7 +142,7 @@ public class Coordinator extends Node {
         checkSumResponse.put(msg.transactionId, voterCheck);
         int votedSum = checkSum.get(msg.transactionId);
         checkSum.put(msg.transactionId, votedSum + msg.sum);
-        if (checkSumResponse.get(msg.transactionId).size() == mapDataStoreByKey.size()) {
+        if (checkSumResponse.get(msg.transactionId).size() == mapServerByKey.size()) {
             System.out.println(">>>>>>>>>>>>>> " + msg.transactionId + " checkSum = " + checkSum.get(msg.transactionId) + " <<<<<<<<<<<<<<<");
         }
     }
@@ -157,13 +157,13 @@ public class Coordinator extends Node {
     }
 
     void multicast(Serializable m) {
-        for (ActorRef p : mapDataStoreByKey.values()) {
+        for (ActorRef p : mapServerByKey.values()) {
             p.tell(m, getSelf());
         }
     }
 
     void multicastAndCrash(Serializable m, int recoverIn) {
-        for (ActorRef p : mapDataStoreByKey.values()) {
+        for (ActorRef p : mapServerByKey.values()) {
             p.tell(m, getSelf());
             crash(recoverIn);
             return;
@@ -171,8 +171,7 @@ public class Coordinator extends Node {
     }
 
     boolean allVotedYes(String transactionId) {
-//        System.out.println("yesVoters size = "+yesVoters.size()+" dataStore size = "+mapDataStoreByKey.size());
-        return (yesVoters.get(transactionId).size() == mapDataStoreByKey.size());
+        return (yesVoters.get(transactionId).size() == mapServerByKey.size());
     }
 
     void tellDecision2Client(String transactionId) {

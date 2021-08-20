@@ -13,28 +13,28 @@ public class Main {
     public static void main(String[] args) {
         final ActorSystem system = ActorSystem.create("distributed-transactions");
 
-        //Construct data-stores
-        HashMap<Integer, ActorRef> mapDataStoreByKey = new HashMap<>();
-        List<ActorRef> dataStores = new ArrayList<>();
+        //Construct servers
+        HashMap<Integer, ActorRef> mapServerByKey = new HashMap<>();
+        List<ActorRef> servers = new ArrayList<>();
         for(int i=0; i<N_SERVER; i++){
             HashMap<Integer, Server.Value> data = new HashMap<>();
             for(int j=0; j<10; j++){
                 data.put(10*i+j, new Server.Value(0, 100));
             }
-            ActorRef dataStore = system.actorOf(Server.props(i, data));
-            mapDataStoreByKey.put(i, dataStore);
-            dataStores.add(dataStore);
+            ActorRef server = system.actorOf(Server.props(i, data), "server-"+i);
+            mapServerByKey.put(i, server);
+            servers.add(server);
         }
 
         //Construct the coordinators
         List<ActorRef> coordinators = new ArrayList<>();
         for (int i = 0; i < N_COORDINATORS; i++) {
-            coordinators.add(system.actorOf(Coordinator.props(i, mapDataStoreByKey), "coordinator-" + i));
+            coordinators.add(system.actorOf(Coordinator.props(i, mapServerByKey), "coordinator-" + i));
         }
 
-        //For each data-store initialize coordinator and other data-store
-        for(ActorRef store : dataStores){
-            store.tell(new Message.InitialSetting(coordinators, dataStores), null);
+        //For each server initialize coordinator and other data-store
+        for(ActorRef store : servers){
+            store.tell(new Message.InitialSetting(coordinators, servers), null);
         }
 
         //Construct client
