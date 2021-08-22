@@ -168,24 +168,38 @@ public class TxnCoordinator extends Node {
     log.info("Coordinator " + id + " recognize " + servers.size() + " servers");
   }
 
+  /**
+   * Process when get a begin message from client
+   * 
+   * @param txnBeginMsg
+   */
   private void onBeginTxnMsg(TxnBeginMsg txnBeginMsg) {
+    // store client Id
     this.processingClientIds.add(txnBeginMsg.clientId);
+    // create transaction id
     String transactionId = UUID.randomUUID().toString();
+    // store useful information about client and associated with transaction
     currentTransaction.put(txnBeginMsg.clientId, transactionId);
     mapCurrentTransaction.put(transactionId, txnBeginMsg.clientId);
     mapCurrentTransactionActor.put(transactionId, getSender());
     // init private workspace
     processingPrivateWorkspace.put(transactionId, new PrivateWorkspace());
     ActorRef sender = getSender();
+    // accept transaction
     sender.tell(new TxnAcceptMsg(), getSelf());
   }
 
+  /**
+   * Process when recive a write message
+   * 
+   * @param writeMsg
+   */
   private void onWriteMsg(WriteMsg writeMsg) {
     Integer clientId = writeMsg.clientId;
-    RowValue readValue = null;
     String transactionId = currentTransaction.get(clientId);
-    readValue = getDataFromPrivateWorkSpace(writeMsg.key, transactionId);
-
+    // RowValue readValue = getDataFromPrivateWorkSpace(writeMsg.key,
+    // transactionId);
+    // Save write operator to private workspace
     PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(transactionId);
     RowValue rowValue = privateWorkspace.getData().get(writeMsg.key);
     rowValue.setValue(writeMsg.value);
@@ -194,23 +208,38 @@ public class TxnCoordinator extends Node {
     privateWorkspace.setData(data);
   }
 
+  /**
+   * Handle a read request
+   * 
+   * @param readMsg
+   */
   private void onReadMsg(ReadMsg readMsg) {
     Integer clientId = readMsg.clientId;
     RowValue readValue = null;
     String transactionId = currentTransaction.get(clientId);
+    // Check if key is in private workspace or not
     if (exitsInPrivateWorkSpace(readMsg.key, transactionId)) {
+      // if data has already in private workspace, the send it to client
       readValue = getDataFromPrivateWorkSpace(readMsg.key, transactionId);
       getSender().tell(new ReadResultMsg(readMsg.key, readValue.getValue()), getSelf());
     } else {
+      // read data from server by key
       mapCurrentTransactionActor.put(transactionId, getSender());
       getDataByKey(readMsg.key, transactionId);
     }
 
   }
 
+  /**
+   * Process VoteResponse message
+   * 
+   * @param vReponse
+   */
   private void onVoteResponse(VoteReponse vReponse) {
+    // check if coordinator decided or not
     if (!historyTransaction.containsKey(vReponse.transactionId)) {
       if (vReponse.vote == Vote.YES) {
+        // check number of vote
         Set<Integer> requireVote = requiredServerVote.get(vReponse.transactionId);
         requireVote.remove(vReponse.clientId);
         requiredServerVote.put(vReponse.transactionId, requireVote);
@@ -222,15 +251,27 @@ public class TxnCoordinator extends Node {
     }
   }
 
+  /**
+   * Handle decision request
+   * 
+   * @param decisionRequest
+   */
   private void onDecisionRequest(DecisionRequest decisionRequest) {
     if (historyTransaction.containsKey(decisionRequest.transactionId))
+      // return decision store in historied transaction
       getSender().tell(
           new DecisionResponse(historyTransaction.get(decisionRequest.transactionId), decisionRequest.transactionId),
           getSelf());
     else
+      // if the transaction has not decided yet, log error to screen
       log.error("EROOR anonymous transaction or not decide yet");
   }
 
+  /**
+   * Handle EndTxnMsg start validation phase
+   * 
+   * @param endMsg
+   */
   private void onEndTxnMsg(TxnEndMsg endMsg) {
     validationPhase(currentTransaction.get(endMsg.clientId));
   }
@@ -253,28 +294,45 @@ public class TxnCoordinator extends Node {
     client.tell(new ReadResultMsg(readDataResultMsg.key, readDataResultMsg.value), getSelf());
   }
 
+  /**
+   * Handle timeout message
+   * 
+   * @param timeout
+   */
   private void onTimeout(Timeout timeout) {
+    // check if transaction is decided or not
     if (!historyTransaction.containsKey(timeout.transactionId))
+      // if transaction has not decided yet, abort it
       if (requiredServerVote.get(timeout.transactionId).contains(timeout.serverId)) {
         abortTransaction(timeout.transactionId);
       }
   }
 
+  /**
+   * handle recovery
+   */
   @Override
   protected void onRecovery(Recovery msg) {
+    // update handle message
     getContext().become(createReceive());
+    // abort any transaction has not decided and lost voteresponse
     for (String transactionId : mapCurrentTransaction.keySet()) {
       abortTransaction(transactionId);
     }
   }
 
+  /**
+   * process validation
+   * 
+   * @param transactionId
+   */
   private void validationPhase(String transactionId) {
-
+    // get data from private workspace
     PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(transactionId);
     Map<Integer, RowValue> data = privateWorkspace.getData();
     Set<Integer> requiredVote = new HashSet<>();
     Map<Integer, Map<Integer, RowValue>> changesByServer = new HashMap<>();
-
+    // organize changes by server
     for (int key : data.keySet()) {
       Map<Integer, RowValue> dataChanges = null;
       if (changesByServer.containsKey(getServerIdByKey(key)))
@@ -285,12 +343,14 @@ public class TxnCoordinator extends Node {
       changesByServer.put(getServerIdByKey(key), dataChanges);
       requiredVote.add(getServerIdByKey(key));
     }
-
+    // ask server validate changes and set timeout event
     for (Integer server : requiredVote) {
       servers.get(server).tell(new VoteRequest(transactionId, changesByServer.get(server)), getSelf());
       setTimeout(transactionId, server, TxnSystem.VOTE_TIMEOUT);
     }
+    // mark required server
     requiredServerVote.put(transactionId, requiredVote);
+    // simulate crash
     // crash(5000);
   }
 
@@ -331,6 +391,11 @@ public class TxnCoordinator extends Node {
     return false;
   }
 
+  /**
+   * Clear private workspace after using
+   * 
+   * @param transactionId
+   */
   private void clearPrivateWorkspace(String transactionId) {
     Integer clientId = mapCurrentTransaction.get(transactionId);
     currentTransaction.remove(clientId);
@@ -341,7 +406,13 @@ public class TxnCoordinator extends Node {
     mapCurrentTransactionActor.remove(transactionId);
   }
 
+  /**
+   * Update phase commit transactiokn
+   * 
+   * @param transactionId
+   */
   private void commitTransaction(String transactionId) {
+    // record decision to history transaction map
     historyTransaction.put(transactionId, Decision.COMMIT);
     mapCurrentTransactionActor.get(transactionId).tell(new TxnResultMsg(true), getSelf());
     Set<ActorRef> informingServer = new HashSet<>();
@@ -350,32 +421,52 @@ public class TxnCoordinator extends Node {
     for (int key : data.keySet()) {
       informingServer.add(getServerByKey(key));
     }
+    // inform related server
     for (ActorRef actor : informingServer)
       actor.tell(new DecisionResponse(Decision.COMMIT, transactionId), getSelf());
+    // clear private workspace
     clearPrivateWorkspace(transactionId);
-
   }
 
+  /**
+   * Update phase arbort transaction
+   * 
+   * @param transactionId
+   */
   private void abortTransaction(String transactionId) {
-
+    // record decision to history transaction map
     historyTransaction.put(transactionId, Decision.ABORT);
     mapCurrentTransactionActor.get(transactionId).tell(new TxnResultMsg(false), getSelf());
     Set<ActorRef> informingServer = new HashSet<>();
     PrivateWorkspace privateWorkspace = processingPrivateWorkspace.get(transactionId);
     Map<Integer, RowValue> data = privateWorkspace.getData();
+    // inform decision to related server
     for (int key : data.keySet()) {
       informingServer.add(getServerByKey(key));
     }
     for (ActorRef actor : informingServer)
       actor.tell(new DecisionResponse(Decision.ABORT, transactionId), getSelf());
+    // clear private workspace
     clearPrivateWorkspace(transactionId);
 
   }
 
+  /**
+   * Get Server ActorRef by storage key
+   * 
+   * @param key
+   * @return
+   */
   private ActorRef getServerByKey(Integer key) {
     return servers.get(key / 10);
   }
 
+  /**
+   * Get server id by storage key
+   * 
+   * @param key
+   * @return
+   */
   private Integer getServerIdByKey(Integer key) {
     return key / 10;
   }
@@ -390,6 +481,13 @@ public class TxnCoordinator extends Node {
                                                                                                 // here ?
   }
 
+  /**
+   * Create time out event (message)
+   * 
+   * @param transactionId
+   * @param serverId
+   * @param time
+   */
   void setTimeout(String transactionId, Integer serverId, int time) {
     getContext().system().scheduler().scheduleOnce(Duration.create(time, TimeUnit.MILLISECONDS), getSelf(),
         new Timeout(transactionId, serverId), getContext().system().dispatcher(), getSelf());

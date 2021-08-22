@@ -9,12 +9,19 @@ import akka.actor.ActorSystem;
 import it.unitn.ds1.TxnClient.WelcomeMsg;
 import it.unitn.ds1.TxnCoordinator.StartMsg;
 import it.unitn.ds1.TxnServer.SumTestRequest;
-
+/**
+ *  - Start simulation
+ *  - Initial actors and control simulation
+ */
 public class TxnSystem {
+  // Number of Servers
   final static int N_SERVERS = 10;
+  // Number of Cordinators
   final static int N_CORDINATORS = 10;
+  // Using N_CLIENTS= 10 for correctness simulation and N_CLIENTS =1 for crash simulation
   //final static int N_CLIENTS = 10;
   final static int N_CLIENTS = 1;
+  // LOG File for checking correctness
   public final static String LOG_SUM_FILENAME = "sum.txt";
   public final static int DECISION_TIMEOUT= 2000;
   public final static int VOTE_TIMEOUT= 1000;
@@ -41,11 +48,11 @@ public class TxnSystem {
     for (int i = 0; i < N_CLIENTS; i++) {
       clients.add(system.actorOf(TxnClient.props(i), "client" + i));
     }
-
+    // start cooordinator
     StartMsg startMsg = new StartMsg(servers);
     for (ActorRef coordinator : coordinators)
       coordinator.tell(startMsg, ActorRef.noSender());
-
+    // start client
     WelcomeMsg welcomeMsg = new WelcomeMsg(N_SERVERS * 10 - 1, coordinators);
     for (ActorRef client : clients)
       client.tell(welcomeMsg, ActorRef.noSender());
