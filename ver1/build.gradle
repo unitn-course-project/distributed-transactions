@@ -1,12 +1,9 @@
-plugins {
-    id 'java'
-}
-
-group 'org.example'
-version '1.0-SNAPSHOT'
+apply plugin: 'java'
+apply plugin: 'application'
 
 repositories {
     mavenCentral()
+    mavenLocal()
 }
 
 def versions = [
@@ -21,6 +18,8 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
 }
 
-test {
-    useJUnitPlatform()
+compileJava {
+    options.compilerArgs += ["-Xlint:deprecation"]
 }
+
+mainClassName = "it.unitn.ds1.Main"
