@@ -1,3 +1,4 @@
 rootProject.name = 'distributed-transactions'
 include 'ver1'
+include 'ver2'
 
