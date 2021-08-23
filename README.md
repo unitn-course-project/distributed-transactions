@@ -22,6 +22,15 @@ These actors worked independently and cooperate with each other. The client send
 
 ### Implementation
 In our project, we implement two different versions. The main idea implementation is the same: associate each transaction with id to manipulate, using lock and private workspace to deal with inconsistent and serialization. The difference is that we implement with varied data structures and protocols (where private workspace is stored (sever or coordinator) and how to run validation phase).
+
+
+### How to run
+- Build `./gradlew build`
+
+- Run v1 `./gradlew :ver1:run`
+
+- Run v2 `./gradlew :ver2:run`
+
 ## Authors
 - Anh Tu Phan [@anhtu95](https://github.com/anhtu95)
 - Tuan Dat Nguyen [@tuandat95cbn](https://github.com/tuandat95cbn)

@@ -26,4 +26,8 @@ compileJava {
     options.compilerArgs += ["-Xlint:deprecation"]
 }
 
+run {
+    standardInput = System.in
+}
+
 mainClassName = "it.unitn.ds1.TxnSystem"
