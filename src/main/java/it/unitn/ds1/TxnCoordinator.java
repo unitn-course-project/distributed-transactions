@@ -243,7 +243,6 @@ public class TxnCoordinator extends Node {
         Set<Integer> requireVote = requiredServerVote.get(vReponse.transactionId);
         requireVote.remove(vReponse.clientId);
         requiredServerVote.put(vReponse.transactionId, requireVote);
-        log.info(requireVote.toString());
         if (requireVote.size() <= 0)
           commitTransaction(vReponse.transactionId);
       } else
