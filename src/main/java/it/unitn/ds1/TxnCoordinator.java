@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -420,11 +421,17 @@ public class TxnCoordinator extends Node {
     for (int key : data.keySet()) {
       informingServer.add(getServerByKey(key));
     }
-    // inform related server
-    for (ActorRef actor : informingServer)
-      actor.tell(new DecisionResponse(Decision.COMMIT, transactionId), getSelf());
     // clear private workspace
     clearPrivateWorkspace(transactionId);
+    // inform related server
+    for (ActorRef actor : informingServer) {
+      if (new Random().nextDouble() < TxnSystem.CRASH_PROBABILITY)
+        if (this.id == 2){
+          crash(TxnSystem.CRASH_TIME);
+          return;
+        }
+      actor.tell(new DecisionResponse(Decision.COMMIT, transactionId), getSelf());
+    }
   }
 
   /**
@@ -478,6 +485,19 @@ public class TxnCoordinator extends Node {
         .match(VoteReponse.class, this::onVoteResponse).match(DecisionRequest.class, this::onDecisionRequest)
         .match(Timeout.class, this::onTimeout).match(Recovery.class, this::onRecovery).build(); // why have recovery
                                                                                                 // here ?
+  }
+/**
+ * When crashed, node discard any request in validation and update phase
+ */
+  @Override
+  public Receive crashed() {
+    return receiveBuilder().match(StartMsg.class, this::onStartMsg).match(TxnBeginMsg.class, this::onBeginTxnMsg)
+        .match(ReadMsg.class, this::onReadMsg).match(ReadDataResultMsg.class, this::onReadResultMsg)
+        .match(WriteMsg.class, this::onWriteMsg).match(TxnEndMsg.class, msg -> {
+        }).match(VoteReponse.class, msg -> {
+        }).match(DecisionRequest.class, msg -> {
+        }).match(Timeout.class, this::onTimeout).match(Recovery.class, this::onRecovery).build(); // why have recovery
+                                                                                                  // here ?
   }
 
   /**

@@ -19,12 +19,14 @@ public class TxnSystem {
   // Number of Cordinators
   final static int N_CORDINATORS = 10;
   // Using N_CLIENTS= 10 for correctness simulation and N_CLIENTS =1 for crash simulation
-  final static int N_CLIENTS = 10;
-  //final static int N_CLIENTS = 1;
+  //final static int N_CLIENTS = 10;
+  final static int N_CLIENTS = 1;
   // LOG File for checking correctness
   public final static String LOG_SUM_FILENAME = "sum.txt";
   public final static int DECISION_TIMEOUT= 2000;
   public final static int VOTE_TIMEOUT= 1000;
+  public static final double CRASH_PROBABILITY = 0.1;
+  public static final int CRASH_TIME = 5000;
 
   public static void main(String[] args) {
     // Create the actor system

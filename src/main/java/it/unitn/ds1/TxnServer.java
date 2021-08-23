@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import akka.actor.ActorRef;
@@ -121,7 +122,8 @@ public class TxnServer extends Node {
     BufferedWriter writer;
     try {
       writer = new BufferedWriter(new FileWriter(TxnSystem.LOG_SUM_FILENAME, true));
-      //writer.write("Sum test server :" + id + " test id is " + sumTestRequest.testId + " sum =" + sum + "\n");
+      // writer.write("Sum test server :" + id + " test id is " +
+      // sumTestRequest.testId + " sum =" + sum + "\n");
       writer.write(sumTestRequest.testId + ", " + sum + "\n");
       // writer.write(sum + "\n");
 
@@ -138,10 +140,12 @@ public class TxnServer extends Node {
    * @param vRequest
    */
   private void onVoteRequest(VoteRequest vRequest) {
-    // if (this.id==0) {
-    // crash(5000);
-    // return;
-    // }
+    Random r = new Random();
+    if (r.nextDouble() < TxnSystem.CRASH_PROBABILITY)
+      if (this.id == 0) {
+        crash(TxnSystem.CRASH_TIME);
+        return;
+      }
     Map<Integer, RowValue> changeData = vRequest.changes;
     Map<Integer, Integer> changes = new HashMap<>();
     for (Integer key : changeData.keySet())
@@ -160,6 +164,9 @@ public class TxnServer extends Node {
     mapTransactionCoordinator.put(vRequest.transactionId, getSender());
     // send vote to coordinator
     getSender().tell(new VoteReponse(Vote.YES, id, vRequest.transactionId), getSelf());
+    if (r.nextDouble() < TxnSystem.CRASH_PROBABILITY)
+      if(this.id==5)
+      crash(TxnSystem.CRASH_TIME);
   }
 
   /**
@@ -193,6 +200,17 @@ public class TxnServer extends Node {
     return receiveBuilder().match(ReadDataMsg.class, this::onReadMsg).match(VoteRequest.class, this::onVoteRequest)
         .match(DecisionResponse.class, this::onDecisionResponse).match(SumTestRequest.class, this::onSumTestRequest)
         .match(Timeout.class, this::onTimeout).build();
+  }
+
+/**
+ * When crashed, node discard any request in validation and update phase
+ */
+  @Override
+  public Receive crashed() {
+    // TODO Auto-generated method stub
+    return receiveBuilder().match(ReadDataMsg.class, this::onReadMsg).match(VoteRequest.class, msg -> {
+    }).match(DecisionResponse.class, msg -> {
+    }).match(SumTestRequest.class, this::onSumTestRequest).match(Timeout.class, this::onTimeout).build();
   }
 
   /**
