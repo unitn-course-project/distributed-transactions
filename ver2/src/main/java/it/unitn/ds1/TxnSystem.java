@@ -25,6 +25,8 @@ public class TxnSystem {
   public final static String LOG_SUM_FILENAME = "sum.txt";
   public final static int DECISION_TIMEOUT= 2000;
   public final static int VOTE_TIMEOUT= 1000;
+  public static final double CRASH_PROBABILITY = 0.1;
+  public static final int CRASH_TIME = 5000;
 
   public static void main(String[] args) {
     // Create the actor system
