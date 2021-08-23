@@ -1,3 +1,5 @@
+package it.unitn.ds1.ver1;
+
 import akka.actor.ActorRef;
 import akka.actor.Props;
 

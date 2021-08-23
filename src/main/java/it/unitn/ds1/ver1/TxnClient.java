@@ -1,3 +1,5 @@
+package it.unitn.ds1.ver1;
+
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
@@ -124,7 +126,7 @@ public class TxnClient extends AbstractActor {
 //                + secondKey + ", " + (secondValue + amountTaken) + ")");
     }
 
-    /*-- Message handlers ----------------------------------------------------- */
+    /*-- it.unitn.ds1.ver1.Message handlers ----------------------------------------------------- */
 
     private void onWelcomeMsg(Message.WelcomeMsg msg) {
         this.coordinators = msg.coordinators;

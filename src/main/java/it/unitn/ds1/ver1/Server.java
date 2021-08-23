@@ -1,3 +1,5 @@
+package it.unitn.ds1.ver1;
+
 import akka.actor.ActorRef;
 import akka.actor.Props;
 
@@ -196,7 +198,7 @@ public class Server extends Node {
     }
 
     private void printData(String transactionId) {
-        StringBuilder printResult = new StringBuilder("========= Server-" + this.id + " with " + transactionId + " =========\n");
+        StringBuilder printResult = new StringBuilder("========= it.unitn.ds1.ver1.Server-" + this.id + " with " + transactionId + " =========\n");
         for (Map.Entry<Integer, Value> element : data.entrySet()) {
             printResult.append(element.getKey()).append(": ").append(element.getValue().toString()).append("\n");
         }
