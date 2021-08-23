@@ -55,10 +55,11 @@ public class TxnServer extends Node {
     transactionChange = new HashMap<>();
     mapTransactionCoordinator = new HashMap<>();
   }
+
   /*-- Message classes ------------------------------------------------------ */
-/**
- * Message caculate the correctness of the system
- */
+  /**
+   * Message caculate the correctness of the system
+   */
   public static class SumTestRequest implements Serializable {
     public final int testId;
 
@@ -80,31 +81,37 @@ public class TxnServer extends Node {
   /*-- Message handlers ----------------------------------------------------- */
   /**
    * Handle read message from coordinator
+   * 
    * @param readMsg
    */
   private void onReadMsg(ReadDataMsg readMsg) {
     RowValue readValue = data.get(readMsg.key);
-    //send back the coordinator data by key
+    // send back the coordinator data by key
     getSender().tell(
         new ReadDataResultMsg(readMsg.transactionId, readMsg.key, readValue.getValue(), readValue.getVersion()),
         getSelf());
   }
-/**
- * Handle timeout event 
- * @param timeout
- */
+
+  /**
+   * Handle timeout event
+   * 
+   * @param timeout
+   */
   private void onTimeout(Timeout timeout) {
     if (transactionChange.containsKey(timeout.transactionId)) {
-      // re-sent DecisionRequest 
+      // re-sent DecisionRequest
       mapTransactionCoordinator.get(timeout.transactionId).tell(new DecisionRequest(timeout.transactionId), getSelf());
       // set timeout again
       setTimeout(timeout.transactionId, TxnSystem.DECISION_TIMEOUT);
     }
   }
-/**
- * Handle Sumtest Request for calculate sum in order to check correctness of system
- * @param sumTestRequest
- */
+
+  /**
+   * Handle Sumtest Request for calculate sum in order to check correctness of
+   * system
+   * 
+   * @param sumTestRequest
+   */
   private void onSumTestRequest(SumTestRequest sumTestRequest) {
     Integer sum = 0;
     for (Integer key : data.keySet()) {
@@ -114,10 +121,9 @@ public class TxnServer extends Node {
     BufferedWriter writer;
     try {
       writer = new BufferedWriter(new FileWriter(TxnSystem.LOG_SUM_FILENAME, true));
-      // writer.write("Sum test server :" + id + " test id is " +
-      // sumTestRequest.testId + " sum =" + sum+"\n");
-      // writer.write(sumTestRequest.testId + ", " + sum+"\n");
-      writer.write(sum + "\n");
+      //writer.write("Sum test server :" + id + " test id is " + sumTestRequest.testId + " sum =" + sum + "\n");
+      writer.write(sumTestRequest.testId + ", " + sum + "\n");
+      // writer.write(sum + "\n");
 
       writer.close();
     } catch (IOException e) {
@@ -125,10 +131,12 @@ public class TxnServer extends Node {
       e.printStackTrace();
     }
   }
-/**
- * Handle vote request and validate changes
- * @param vRequest
- */
+
+  /**
+   * Handle vote request and validate changes
+   * 
+   * @param vRequest
+   */
   private void onVoteRequest(VoteRequest vRequest) {
     // if (this.id==0) {
     // crash(5000);
@@ -137,11 +145,12 @@ public class TxnServer extends Node {
     Map<Integer, RowValue> changeData = vRequest.changes;
     Map<Integer, Integer> changes = new HashMap<>();
     for (Integer key : changeData.keySet())
-    // Check lock and data version if it violate version contraint or locks, then abort transaction
+      // Check lock and data version if it violate version contraint or locks, then
+      // abort transaction
       if (validationLocks.containsKey(key) || data.get(key).getVersion() > changeData.get(key).getVersion())
-        //  abort transaction
+        // abort transaction
         getSender().tell(new VoteReponse(Vote.NO, id, vRequest.transactionId), getSelf());
-      // If it didn't violate any contraint, thus lock changed key
+    // If it didn't violate any contraint, thus lock changed key
     for (Integer key : changeData.keySet()) {
       validationLocks.put(key, vRequest.transactionId);
       // store the changes in the sever
@@ -152,10 +161,12 @@ public class TxnServer extends Node {
     // send vote to coordinator
     getSender().tell(new VoteReponse(Vote.YES, id, vRequest.transactionId), getSelf());
   }
-/**
- * Handle decision response from coordinator
- * @param decisionResponse
- */
+
+  /**
+   * Handle decision response from coordinator
+   * 
+   * @param decisionResponse
+   */
   private void onDecisionResponse(DecisionResponse decisionResponse) {
     Map<Integer, Integer> changes = transactionChange.get(decisionResponse.transactionId);
     // if the decision is Yes, then update storage
@@ -183,9 +194,10 @@ public class TxnServer extends Node {
         .match(DecisionResponse.class, this::onDecisionResponse).match(SumTestRequest.class, this::onSumTestRequest)
         .match(Timeout.class, this::onTimeout).build();
   }
-/**
- * Recovery after crashing
- */
+
+  /**
+   * Recovery after crashing
+   */
   @Override
   protected void onRecovery(Recovery msg) {
     // change handle message
@@ -198,11 +210,13 @@ public class TxnServer extends Node {
       setTimeout(transactionId, TxnSystem.DECISION_TIMEOUT);
     }
   }
-/**
- * Set timeout event
- * @param transactionId
- * @param time
- */
+
+  /**
+   * Set timeout event
+   * 
+   * @param transactionId
+   * @param time
+   */
   void setTimeout(String transactionId, int time) {
     getContext().system().scheduler().scheduleOnce(Duration.create(time, TimeUnit.MILLISECONDS), getSelf(),
         new Timeout(transactionId), getContext().system().dispatcher(), getSelf());

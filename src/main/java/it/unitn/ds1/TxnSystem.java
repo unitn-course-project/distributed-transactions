@@ -19,8 +19,8 @@ public class TxnSystem {
   // Number of Cordinators
   final static int N_CORDINATORS = 10;
   // Using N_CLIENTS= 10 for correctness simulation and N_CLIENTS =1 for crash simulation
-  //final static int N_CLIENTS = 10;
-  final static int N_CLIENTS = 1;
+  final static int N_CLIENTS = 10;
+  //final static int N_CLIENTS = 1;
   // LOG File for checking correctness
   public final static String LOG_SUM_FILENAME = "sum.txt";
   public final static int DECISION_TIMEOUT= 2000;
