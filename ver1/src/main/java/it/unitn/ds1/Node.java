@@ -1,4 +1,4 @@
-package it.unitn.ds1.ver1;
+package it.unitn.ds1;
 
 import akka.actor.AbstractActor;
 import scala.concurrent.duration.Duration;

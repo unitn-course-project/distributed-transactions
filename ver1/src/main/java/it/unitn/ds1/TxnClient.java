@@ -1,4 +1,4 @@
-package it.unitn.ds1.ver1;
+package it.unitn.ds1;
 
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
@@ -126,7 +126,7 @@ public class TxnClient extends AbstractActor {
 //                + secondKey + ", " + (secondValue + amountTaken) + ")");
     }
 
-    /*-- it.unitn.ds1.ver1.Message handlers ----------------------------------------------------- */
+    /*-- it.unitn.ds1.Message handlers ----------------------------------------------------- */
 
     private void onWelcomeMsg(Message.WelcomeMsg msg) {
         this.coordinators = msg.coordinators;
